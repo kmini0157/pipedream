@@ -1,0 +1,34 @@
+# Daily collect + digest on GitHub Actions (free).
+# Copy to .github/workflows/second-brain-daily.yml in YOUR repo.
+# Persists data/ back to the repo so seen-state and the store survive runs.
+name: second-brain-daily
+on:
+  schedule:
+    - cron: "0 22 * * *"   # 07:00 KST (UTC+9)
+  workflow_dispatch:
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - working-directory: second-brain
+        run: npm install --ignore-scripts
+      - working-directory: second-brain
+        env:
+          EMBED_PROVIDER: local        # or "hashing" to skip the model download
+          NOTIFY: ntfy                 # or resend
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          # RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          # RESEND_TO: you@example.com
+        run: |
+          node scripts/collect.mjs
+          node scripts/digest.mjs
+      - run: |
+          git config user.name  "second-brain-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add second-brain/data || true
+          git commit -m "chore: daily collect" || echo "nothing to commit"
+          git push || true

@@ -1,4 +1,6 @@
 node_modules/
 data/store.ndjson
+data/watches.ndjson
+data/digest-latest.md
 data/models/
 *.log

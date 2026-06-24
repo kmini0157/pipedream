@@ -4,6 +4,9 @@ import { readFile } from "node:fs/promises";
 import { embed, embedOne } from "./lib/embed.mjs";
 import { add, search, stats } from "./lib/store.mjs";
 import { fetchUrlText, chunk } from "./lib/ingest.mjs";
+import * as feeds from "./lib/feeds.mjs";
+import { collectAll } from "./lib/collect.mjs";
+import { buildDigest } from "./lib/digest.mjs";
 
 const PORT = process.env.PORT || 8787;
 const PUBLIC = new URL("./public/", import.meta.url).pathname;
@@ -72,6 +75,32 @@ async function handleSearch(req, res) {
   json(res, 200, { query, hits });
 }
 
+async function handleWatches(req, res) {
+  if (req.method === "GET") return json(res, 200, { watches: feeds.list() });
+  if (req.method === "POST") {
+    const { topic, url, type } = await readBody(req);
+    if (!url) return json(res, 400, { error: "url required" });
+    return json(res, 200, { ok: true, watch: feeds.add({ topic, url, type }) });
+  }
+  if (req.method === "DELETE") {
+    const id = new URL(req.url, "http://x").searchParams.get("id");
+    return json(res, 200, { removed: feeds.remove(id) });
+  }
+  return json(res, 405, { error: "method" });
+}
+
+async function handleCollect(req, res) {
+  const results = await collectAll();
+  const total = results.reduce((n, r) => n + (r.new || 0), 0);
+  json(res, 200, { ok: true, total, results });
+}
+
+function handleDigest(req, res) {
+  const hours = Number(new URL(req.url, "http://x").searchParams.get("hours") || 24);
+  const cutoff = new Date(Date.now() - hours * 3600 * 1000).toISOString();
+  json(res, 200, buildDigest(cutoff, new Date().toISOString().slice(0, 10)));
+}
+
 async function serveStatic(req, res) {
   const path = req.url === "/" ? "/index.html" : req.url.split("?")[0];
   try {
@@ -94,6 +123,9 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/ingest") return handleIngest(req, res);
     if (req.method === "POST" && req.url === "/search") return handleSearch(req, res);
     if (req.method === "GET" && req.url === "/stats") return json(res, 200, stats());
+    if (req.url.startsWith("/watches")) return handleWatches(req, res);
+    if (req.method === "POST" && req.url === "/collect") return handleCollect(req, res);
+    if (req.method === "GET" && req.url.startsWith("/digest")) return handleDigest(req, res);
     return serveStatic(req, res);
   } catch (e) {
     json(res, 500, { error: String(e.message || e) });

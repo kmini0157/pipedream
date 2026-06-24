@@ -49,3 +49,12 @@ export function stats() {
   const docs = new Set(rows.map((r) => r.docId));
   return { chunks: rows.length, docs: docs.size };
 }
+
+// Rows added at/after an ISO timestamp (vectors stripped), newest first.
+export function since(tsIso) {
+  const rows = load();
+  return rows
+    .filter((r) => r.ts && r.ts >= tsIso)
+    .sort((a, b) => (a.ts < b.ts ? 1 : -1))
+    .map(({ vec, ...rest }) => rest);
+}

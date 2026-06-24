@@ -35,6 +35,23 @@
 </div>
 
 <div class="card">
+  <strong>🔔 관심 주제 · 피드</strong>
+  <p class="muted">RSS/Atom 주소나 웹페이지를 등록하면 매일 자동으로 새 글만 모아옵니다.</p>
+  <div class="row">
+    <input id="wTopic" placeholder="주제명 (예: 무료 AI 인프라)" style="flex:1" />
+    <input id="wUrl" placeholder="https://…/feed.xml 또는 페이지 URL" style="flex:2" />
+  </div>
+  <div class="row"><button id="wAdd">등록</button><button id="collectBtn" style="background:#0891b2">지금 수집</button><span id="wMsg" class="muted"></span></div>
+  <div id="watchList"></div>
+</div>
+
+<div class="card">
+  <strong>📰 오늘의 다이제스트</strong>
+  <div class="row"><button id="digestBtn">최근 24시간 요약 보기</button><span id="dMsg" class="muted"></span></div>
+  <div id="digest" class="answer"></div>
+</div>
+
+<div class="card">
   <strong>？ 물어보기</strong>
   <div class="row"><input id="q" placeholder="예: 그때 저장한 무료 GPU 옵션 뭐였지?" /></div>
   <div class="row"><button id="askBtn">검색 + 답변</button><span id="askMsg" class="muted"></span></div>
@@ -66,6 +83,51 @@ $("addBtn").onclick = async () => {
     $("url").value = ""; $("text").value = ""; refreshStats();
   } catch (e) { $("addMsg").textContent = "✗ " + e.message; }
   $("addBtn").disabled = false;
+};
+
+// ---- watches ----
+async function loadWatches() {
+  const { watches } = await (await fetch(API + "/watches")).json();
+  $("watchList").innerHTML = watches.length
+    ? watches.map((w) => `<div class="src">• <b>${w.topic}</b> <span class="muted">${w.type} · ${w.seenCount}개 추적</span> <a href="#" data-id="${w.id}" class="del">삭제</a></div>`).join("")
+    : "<div class='muted'>아직 등록된 주제가 없어요.</div>";
+  document.querySelectorAll(".del").forEach((a) => a.onclick = async (e) => {
+    e.preventDefault();
+    await fetch(API + "/watches?id=" + a.dataset.id, { method: "DELETE" });
+    loadWatches();
+  });
+}
+loadWatches();
+
+$("wAdd").onclick = async () => {
+  const topic = $("wTopic").value.trim(), url = $("wUrl").value.trim();
+  if (!url) return;
+  $("wMsg").textContent = "등록 중…";
+  await fetch(API + "/watches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topic, url }) });
+  $("wTopic").value = ""; $("wUrl").value = ""; $("wMsg").textContent = "✓ 등록됨";
+  loadWatches();
+};
+
+$("collectBtn").onclick = async () => {
+  $("wMsg").textContent = "수집 중… (피드 개수만큼 걸려요)";
+  try {
+    const r = await (await fetch(API + "/collect", { method: "POST" })).json();
+    $("wMsg").textContent = `✓ 새 항목 ${r.total}건 수집`;
+    refreshStats(); loadWatches();
+  } catch (e) { $("wMsg").textContent = "✗ " + e.message; }
+};
+
+$("digestBtn").onclick = async () => {
+  $("dMsg").textContent = "불러오는 중…";
+  const d = await (await fetch(API + "/digest?hours=24")).json();
+  $("dMsg").textContent = `${d.count}건 · ${d.topics}개 주제`;
+  // minimal markdown -> html
+  $("digest").innerHTML = d.markdown
+    .replace(/^# (.*)$/gm, "<h2>$1</h2>")
+    .replace(/^## (.*)$/gm, "<h3>$1</h3>")
+    .replace(/\[원문\]\(([^)]+)\)/g, '<a href="$1" target="_blank">원문</a>')
+    .replace(/\*\*(.*?)\*\*/g, "<b>$1</b>")
+    .replace(/^- /gm, "• ").replace(/\n/g, "<br>");
 };
 
 $("askBtn").onclick = async () => {

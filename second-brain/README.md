@@ -40,6 +40,42 @@ EMBED_PROVIDER=hashing npm run smoke   # 네트워크 없이 전 과정 검증
 > `r.jina.ai`가 차단되어, 검증은 `hashing` 공급자(오프라인)로 수행했습니다.
 > 로컬/일반 환경에선 `local`(MiniLM)과 Jina 추출이 그대로 동작합니다.
 
+## 매일 여는 앱 — 자동 수집 + 다이제스트
+
+관심 주제(RSS/Atom/웹페이지)를 등록해 두면, 매일 자동으로 **새 글만** 모아
+저장하고(중복 제거), 지난 24시간치를 **요약 다이제스트**로 만들어 알림으로
+보냅니다. 이게 "매일 여는" 고리입니다.
+
+```bash
+# 1) 주제 등록 (UI에서 해도 됨)
+curl -X POST localhost:8787/watches -d '{"topic":"무료 AI 인프라","url":"https://example.com/feed.xml"}'
+
+# 2) 수집 — 새 항목만 ingest (cron 대상)
+node scripts/collect.mjs
+
+# 3) 다이제스트 생성 + 전송 (cron 대상)
+NOTIFY=ntfy NTFY_TOPIC=my-secret-topic node scripts/digest.mjs
+```
+
+### 알림 채널 (`NOTIFY`, 콤마로 복수 가능)
+
+| 값 | 필요 설정 | 비고 |
+|----|-----------|------|
+| `console` (기본) | — | stdout 출력 |
+| `file` | — | `data/digest-latest.md` 작성 |
+| `ntfy` | `NTFY_TOPIC` | **키 없이** 휴대폰 푸시 (ntfy.sh) |
+| `resend` | `RESEND_API_KEY`, `RESEND_TO` | 이메일 발송 |
+
+### 스케줄링
+
+- **GitHub Actions** (무료): `examples/github-actions-daily.yml`를 본인 레포의
+  `.github/workflows/`로 복사. 매일 07:00 KST에 수집+다이제스트 실행.
+- **crontab**: `0 7 * * * cd /path/second-brain && node scripts/collect.mjs && NOTIFY=ntfy NTFY_TOPIC=... node scripts/digest.mjs`
+- **n8n**: Cron 노드 → HTTP Request 노드로 `POST /collect` 후 `GET /digest`.
+
+요약은 기본이 **추출식**(키 없음·오프라인)입니다. 더 매끄러운 요약이 필요하면
+`lib/digest.mjs`의 요약 단계를 Puter/LLM 호출로 교체하면 됩니다.
+
 ## API
 
 | 메서드 | 경로 | 바디 | 설명 |
@@ -47,17 +83,35 @@ EMBED_PROVIDER=hashing npm run smoke   # 네트워크 없이 전 과정 검증
 | POST | `/ingest` | `{url}` 또는 `{text, title?}` | 추출→청킹→임베딩→저장 |
 | POST | `/search` | `{query, k?}` | 의미 검색 (top-k 조각 + 출처) |
 | GET | `/stats` | — | 저장된 docs/chunks 수 |
+| GET/POST/DELETE | `/watches` | `{topic,url}` / `?id=` | 관심 주제 관리 |
+| POST | `/collect` | — | 모든 주제 폴링 후 새 글 ingest |
+| GET | `/digest` | `?hours=24` | 최근 N시간 다이제스트(markdown) |
 
 ## 구조
 
 ```
 second-brain/
-  server.mjs          # 의존성 0 HTTP 서버 (ingest/search/stats + 정적)
-  lib/embed.mjs       # 플러그러블 임베딩 (local | hashing)
-  lib/store.mjs       # NDJSON 벡터 스토어 + 코사인 검색
-  lib/ingest.mjs      # Jina 추출 + 청킹
-  public/index.html   # UI + Puter.js 답변 합성
-  scripts/smoke.mjs   # 오프라인 E2E 테스트
+  server.mjs               # HTTP 서버 (ingest/search/stats/watches/collect/digest + 정적)
+  lib/embed.mjs            # 플러그러블 임베딩 (local | hashing)
+  lib/store.mjs            # NDJSON 벡터 스토어 + 코사인 검색
+  lib/ingest.mjs           # Jina 추출 + 청킹
+  lib/feeds.mjs            # 관심 주제(구독) 관리 + seen 중복 제거
+  lib/feedparse.mjs        # 의존성 0 RSS/Atom 파서
+  lib/collect.mjs          # 폴링 → 새 글만 ingest
+  lib/digest.mjs           # 추출식 다이제스트 생성
+  lib/notify.mjs           # 전송 (console/file/ntfy/resend)
+  public/index.html        # UI + Puter.js 답변 합성
+  scripts/smoke.mjs        # 오프라인 E2E (검색)
+  scripts/smoke-daily.mjs  # 오프라인 E2E (수집→다이제스트)
+  scripts/collect.mjs      # cron: 수집
+  scripts/digest.mjs       # cron: 다이제스트 + 전송
+  examples/github-actions-daily.yml
+```
+
+검증:
+```bash
+EMBED_PROVIDER=hashing npm run smoke         # 검색 파이프라인
+EMBED_PROVIDER=hashing npm run smoke:daily   # 매일 루프
 ```
 
 ## 다음 단계 (의존도를 높이는 방향)
