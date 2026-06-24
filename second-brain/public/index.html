@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>🧠 Second Brain</title>
+<!-- Puter.js: keyless, in-browser LLM for the final answer synthesis -->
+<script src="https://js.puter.com/v2/"></script>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 760px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 22px; }
+  textarea, input { width: 100%; padding: 10px; border: 1px solid #8884; border-radius: 8px; font: inherit; background: transparent; color: inherit; }
+  textarea { min-height: 80px; resize: vertical; }
+  button { padding: 9px 16px; border: 0; border-radius: 8px; background: #4f46e5; color: #fff; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: progress; }
+  .row { display: flex; gap: 8px; margin: 8px 0; }
+  .card { border: 1px solid #8883; border-radius: 12px; padding: 16px; margin: 16px 0; }
+  .muted { opacity: .65; font-size: 13px; }
+  .src { font-size: 12px; opacity: .7; margin-top: 6px; }
+  .answer { white-space: pre-wrap; }
+  .pill { display: inline-block; background: #4f46e522; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>🧠 Second Brain <span class="pill" id="stats">…</span></h1>
+<p class="muted">웹 링크나 메모를 던져두면 의미로 저장되고, 나중에 자연어로 물어보면 출처와 함께 답합니다. (키 없이 동작: Jina + 로컬 임베딩 + Puter LLM)</p>
+
+<div class="card">
+  <strong>＋ 추가하기</strong>
+  <div class="row"><input id="url" placeholder="https://… (웹페이지 URL — Jina로 추출)" /></div>
+  <div class="row"><textarea id="text" placeholder="또는 직접 메모/텍스트 붙여넣기"></textarea></div>
+  <div class="row"><button id="addBtn">저장</button><span id="addMsg" class="muted"></span></div>
+</div>
+
+<div class="card">
+  <strong>？ 물어보기</strong>
+  <div class="row"><input id="q" placeholder="예: 그때 저장한 무료 GPU 옵션 뭐였지?" /></div>
+  <div class="row"><button id="askBtn">검색 + 답변</button><span id="askMsg" class="muted"></span></div>
+  <div id="answer"></div>
+  <div id="hits"></div>
+</div>
+
+<script>
+const API = location.origin;
+const $ = (id) => document.getElementById(id);
+
+async function refreshStats() {
+  try { const s = await (await fetch(API + "/stats")).json();
+    $("stats").textContent = `${s.docs} docs · ${s.chunks} chunks`; } catch {}
+}
+refreshStats();
+
+$("addBtn").onclick = async () => {
+  const url = $("url").value.trim(), text = $("text").value.trim();
+  if (!url && !text) return;
+  $("addBtn").disabled = true; $("addMsg").textContent = "처리 중…";
+  try {
+    const r = await (await fetch(API + "/ingest", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: url || undefined, text: text || undefined }),
+    })).json();
+    if (r.error) throw new Error(r.error);
+    $("addMsg").textContent = `✓ "${r.title}" — ${r.chunks} chunks 저장됨`;
+    $("url").value = ""; $("text").value = ""; refreshStats();
+  } catch (e) { $("addMsg").textContent = "✗ " + e.message; }
+  $("addBtn").disabled = false;
+};
+
+$("askBtn").onclick = async () => {
+  const query = $("q").value.trim();
+  if (!query) return;
+  $("askBtn").disabled = true; $("askMsg").textContent = "검색 중…";
+  $("answer").innerHTML = ""; $("hits").innerHTML = "";
+  try {
+    const { hits } = await (await fetch(API + "/search", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, k: 5 }),
+    })).json();
+
+    if (!hits.length) { $("askMsg").textContent = "저장된 내용이 없어요."; $("askBtn").disabled = false; return; }
+
+    // Show retrieved sources immediately.
+    $("hits").innerHTML = "<div class='muted' style='margin-top:12px'>참고한 조각:</div>" +
+      hits.map((h, i) => `<div class="src">[${i + 1}] ${h.title} (${(h.score).toFixed(2)})</div>`).join("");
+
+    // Synthesize an answer with Puter (keyless, in-browser LLM).
+    $("askMsg").textContent = "답변 생성 중…";
+    const context = hits.map((h, i) => `[${i + 1}] (${h.title})\n${h.text}`).join("\n\n");
+    const prompt = `아래 발췌만 근거로 질문에 한국어로 답하고, 문장 끝에 [번호] 출처를 달아줘. 근거가 없으면 모른다고 해.\n\n질문: ${query}\n\n발췌:\n${context}`;
+    const resp = await puter.ai.chat(prompt, { model: "gpt-4o-mini" });
+    $("answer").innerHTML = `<div class="answer">${(resp?.message?.content || resp).toString()}</div>`;
+    $("askMsg").textContent = "";
+  } catch (e) {
+    $("askMsg").textContent = "✗ " + e.message + " (Puter 답변 단계는 브라우저에서만 동작)";
+  }
+  $("askBtn").disabled = false;
+};
+</script>
+</body>
+</html>
