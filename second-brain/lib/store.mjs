@@ -1,60 +1,30 @@
-// Dependency-free vector store: NDJSON on disk + in-memory cosine search.
-// Each line is one chunk: { id, docId, source, title, text, vec, ts }
-import { readFileSync, appendFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+// Pluggable vector store façade. STORE=ndjson (default) | libsql.
+//   ndjson — zero-dependency NDJSON file, single machine.
+//   libsql — libSQL/Turso (local file: URL or remote libsql:// for multi-device).
+// All methods are async so either adapter (sync or async) works behind one API.
+const STORE = process.env.STORE || "ndjson";
 
-const DB_PATH = new URL("../data/store.ndjson", import.meta.url).pathname;
-
-let _rows = null;
-
-function ensureFile() {
-  const dir = dirname(DB_PATH);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  if (!existsSync(DB_PATH)) appendFileSync(DB_PATH, "");
+let _adapter = null;
+async function adapter() {
+  if (!_adapter) {
+    _adapter =
+      STORE === "libsql"
+        ? await import("./store-libsql.mjs")
+        : await import("./store-ndjson.mjs");
+  }
+  return _adapter;
 }
 
-function load() {
-  if (_rows) return _rows;
-  ensureFile();
-  const raw = readFileSync(DB_PATH, "utf8").trim();
-  _rows = raw ? raw.split("\n").map((l) => JSON.parse(l)) : [];
-  return _rows;
+export async function add(rows) {
+  return (await adapter()).add(rows);
 }
-
-export function add(rows) {
-  load();
-  const lines = rows.map((r) => JSON.stringify(r)).join("\n") + "\n";
-  appendFileSync(DB_PATH, lines);
-  _rows.push(...rows);
-  return rows.length;
+export async function search(queryVec, k = 5) {
+  return (await adapter()).search(queryVec, k);
 }
-
-function cosine(a, b) {
-  let dot = 0;
-  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
-  return dot; // vectors are L2-normalized, so dot product == cosine similarity
+export async function stats() {
+  return (await adapter()).stats();
 }
-
-export function search(queryVec, k = 5) {
-  const rows = load();
-  return rows
-    .map((r) => ({ ...r, score: cosine(queryVec, r.vec) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, k)
-    .map(({ vec, ...rest }) => rest); // drop heavy vector from response
+export async function since(tsIso) {
+  return (await adapter()).since(tsIso);
 }
-
-export function stats() {
-  const rows = load();
-  const docs = new Set(rows.map((r) => r.docId));
-  return { chunks: rows.length, docs: docs.size };
-}
-
-// Rows added at/after an ISO timestamp (vectors stripped), newest first.
-export function since(tsIso) {
-  const rows = load();
-  return rows
-    .filter((r) => r.ts && r.ts >= tsIso)
-    .sort((a, b) => (a.ts < b.ts ? 1 : -1))
-    .map(({ vec, ...rest }) => rest);
-}
+export const backend = STORE;

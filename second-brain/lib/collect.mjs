@@ -16,7 +16,7 @@ export async function ingestItems(watch, items) {
     const chunks = chunk(text);
     const vecs = await embed(chunks);
     const docId = "f" + Math.abs(hash(itemKey(it)));
-    add(
+    await add(
       chunks.map((c, i) => ({
         id: `${docId}-${i}`,
         docId,

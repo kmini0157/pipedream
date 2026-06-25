@@ -10,7 +10,7 @@
 |------|------|
 | 웹 추출 | **Jina Reader** (`r.jina.ai`, 키 없음) |
 | 임베딩 | **transformers.js** all-MiniLM-L6-v2 (로컬·키 없음·오프라인) |
-| 저장/검색 | NDJSON + 코사인 유사도 (네이티브 의존성 0) |
+| 저장/검색 | NDJSON(기본) 또는 **libSQL/Turso**(영구무료, 멀티기기) + 코사인 |
 | 답변 합성 | **Puter.js** (브라우저 LLM, 키 없음) |
 | 호스팅 | Cloudflare Pages/Workers 등 어디든 (정적 + 작은 Node 서버) |
 
@@ -24,6 +24,24 @@ npm start              # http://localhost:8787 접속
 
 브라우저에서 URL이나 메모를 추가하고, 질문하면 검색된 출처를 근거로 Puter가
 한국어로 답합니다.
+
+### 저장소 (`STORE`)
+
+| 값 | 설정 | 용도 |
+|----|------|------|
+| `ndjson` (기본) | — | 단일 기기, 의존성 0 |
+| `libsql` (로컬) | `LIBSQL_URL=file:data/store.db` | 단일 기기, SQLite |
+| `libsql` (원격) | `LIBSQL_URL=libsql://…turso.io` + `LIBSQL_AUTH_TOKEN` | **멀티기기·배포** ([Turso](https://turso.tech) 영구무료) |
+
+로컬 `file:`과 원격 Turso는 **완전히 같은 코드 경로**입니다. 로컬에서 검증한 뒤
+URL만 바꾸면 여러 기기에서 같은 지식을 공유합니다.
+
+```bash
+# 로컬 SQLite 로 전환
+STORE=libsql LIBSQL_URL=file:data/store.db npm start
+# 원격 Turso 로 전환 (멀티기기)
+STORE=libsql LIBSQL_URL=libsql://your-db.turso.io LIBSQL_AUTH_TOKEN=xxx npm start
+```
 
 ### 임베딩 공급자 (`EMBED_PROVIDER`)
 
@@ -93,7 +111,9 @@ NOTIFY=ntfy NTFY_TOPIC=my-secret-topic node scripts/digest.mjs
 second-brain/
   server.mjs               # HTTP 서버 (ingest/search/stats/watches/collect/digest + 정적)
   lib/embed.mjs            # 플러그러블 임베딩 (local | hashing)
-  lib/store.mjs            # NDJSON 벡터 스토어 + 코사인 검색
+  lib/store.mjs            # 스토어 façade (ndjson | libsql 선택)
+  lib/store-ndjson.mjs     # NDJSON 어댑터 (의존성 0)
+  lib/store-libsql.mjs     # libSQL/Turso 어댑터 (로컬 file: / 원격)
   lib/ingest.mjs           # Jina 추출 + 청킹
   lib/feeds.mjs            # 관심 주제(구독) 관리 + seen 중복 제거
   lib/feedparse.mjs        # 의존성 0 RSS/Atom 파서

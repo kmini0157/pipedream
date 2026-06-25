@@ -48,7 +48,7 @@ assert(r2.new === 0, `expected 0 new on re-run, got ${r2.new}`);
 
 console.log("4) build digest (last 24h)");
 const cutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-const digest = buildDigest(cutoff, "2026-06-24");
+const digest = await buildDigest(cutoff, "2026-06-24");
 assert(digest.count >= 2, `digest should include >=2 items, got ${digest.count}`);
 assert(/무료 AI 인프라/.test(digest.markdown), "digest missing topic heading");
 assert(/Kaggle/.test(digest.markdown), "digest missing Kaggle item");

@@ -35,8 +35,8 @@ function groupDocs(rows) {
   return [...byDoc.values()];
 }
 
-export function buildDigest(sinceIso, dateLabel) {
-  const rows = since(sinceIso);
+export async function buildDigest(sinceIso, dateLabel) {
+  const rows = await since(sinceIso);
   const docs = groupDocs(rows);
 
   const byTopic = new Map();

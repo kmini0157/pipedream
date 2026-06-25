@@ -63,7 +63,7 @@ async function handleIngest(req, res) {
     vec: vecs[i],
     ts: new Date().toISOString(),
   }));
-  add(rows);
+  await add(rows);
   json(res, 200, { ok: true, docId, title: docTitle, chunks: rows.length });
 }
 
@@ -71,7 +71,7 @@ async function handleSearch(req, res) {
   const { query, k } = await readBody(req);
   if (!query) return json(res, 400, { error: "query required" });
   const qv = await embedOne(query);
-  const hits = search(qv, k || 5);
+  const hits = await search(qv, k || 5);
   json(res, 200, { query, hits });
 }
 
@@ -95,10 +95,10 @@ async function handleCollect(req, res) {
   json(res, 200, { ok: true, total, results });
 }
 
-function handleDigest(req, res) {
+async function handleDigest(req, res) {
   const hours = Number(new URL(req.url, "http://x").searchParams.get("hours") || 24);
   const cutoff = new Date(Date.now() - hours * 3600 * 1000).toISOString();
-  json(res, 200, buildDigest(cutoff, new Date().toISOString().slice(0, 10)));
+  json(res, 200, await buildDigest(cutoff, new Date().toISOString().slice(0, 10)));
 }
 
 async function serveStatic(req, res) {
@@ -122,7 +122,7 @@ const server = createServer(async (req, res) => {
     if (req.method === "OPTIONS") return json(res, 204, {});
     if (req.method === "POST" && req.url === "/ingest") return handleIngest(req, res);
     if (req.method === "POST" && req.url === "/search") return handleSearch(req, res);
-    if (req.method === "GET" && req.url === "/stats") return json(res, 200, stats());
+    if (req.method === "GET" && req.url === "/stats") return json(res, 200, await stats());
     if (req.url.startsWith("/watches")) return handleWatches(req, res);
     if (req.method === "POST" && req.url === "/collect") return handleCollect(req, res);
     if (req.method === "GET" && req.url.startsWith("/digest")) return handleDigest(req, res);

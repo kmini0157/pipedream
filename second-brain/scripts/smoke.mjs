@@ -16,12 +16,12 @@ console.log("1) ingest + embed + store…");
 for (const [di, d] of docs.entries()) {
   const chunks = chunk(d.text);
   const vecs = await embed(chunks);
-  add(chunks.map((text, i) => ({
+  await add(chunks.map((text, i) => ({
     id: `smoke${di}-${i}`, docId: `smoke${di}`, source: "smoke",
     title: d.title, text, vec: vecs[i], ts: new Date().toISOString(),
   })));
 }
-console.log("   stats:", stats());
+console.log("   stats:", await stats());
 
 console.log("2) retrieval…");
 const cases = [
@@ -32,7 +32,7 @@ const cases = [
 
 let pass = 0;
 for (const c of cases) {
-  const hits = search(await embedOne(c.q), 3);
+  const hits = await search(await embedOne(c.q), 3);
   const top = hits[0];
   const ok = top && top.title === c.expect;
   if (ok) pass++;
