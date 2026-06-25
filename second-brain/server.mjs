@@ -2,7 +2,7 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { embed, embedOne } from "./lib/embed.mjs";
-import { search, stats } from "./lib/store.mjs";
+import { search, stats, topics } from "./lib/store.mjs";
 import * as feeds from "./lib/feeds.mjs";
 import { collectAll } from "./lib/collect.mjs";
 import { buildDigest } from "./lib/digest.mjs";
@@ -75,11 +75,16 @@ async function handleClip(req, res) {
 }
 
 async function handleSearch(req, res) {
-  const { query, k } = await readBody(req);
+  const { query, k, topic, since, until, kind } = await readBody(req);
   if (!query) return json(res, 400, { error: "query required" });
   const qv = await embedOne(query);
-  const hits = await search(qv, k || 5);
-  json(res, 200, { query, hits });
+  const filters = {};
+  if (topic) filters.topic = topic;
+  if (kind) filters.kind = kind;
+  if (since) filters.since = since;
+  if (until) filters.until = until;
+  const hits = await search(qv, k || 5, filters);
+  json(res, 200, { query, filters, hits });
 }
 
 async function handleWatches(req, res) {
@@ -132,6 +137,7 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && req.url.startsWith("/clip")) return handleClip(req, res);
     if (req.method === "POST" && req.url === "/search") return handleSearch(req, res);
     if (req.method === "GET" && req.url === "/stats") return json(res, 200, await stats());
+    if (req.method === "GET" && req.url === "/topics") return json(res, 200, { topics: await topics() });
     if (req.url.startsWith("/watches")) return handleWatches(req, res);
     if (req.method === "POST" && req.url === "/collect") return handleCollect(req, res);
     if (req.method === "GET" && req.url.startsWith("/digest")) return handleDigest(req, res);

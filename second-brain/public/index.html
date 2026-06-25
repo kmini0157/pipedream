@@ -34,7 +34,7 @@
   <div class="row">
     <button id="addBtn">저장</button>
     <button id="micBtn" style="background:#7c3aed" title="브라우저 음성 인식">🎙️ 음성</button>
-    <label class="pill" style="cursor:pointer">📎 파일<input id="file" type="file" accept=".md,.markdown,.txt,.html,.htm,.json,.csv,.log" multiple hidden /></label>
+    <label class="pill" style="cursor:pointer">📎 파일<input id="file" type="file" accept=".md,.markdown,.txt,.html,.htm,.json,.csv,.log,.pdf" multiple hidden /></label>
     <span id="addMsg" class="muted"></span>
   </div>
 </div>
@@ -65,7 +65,17 @@
 <div class="card">
   <strong>？ 물어보기</strong>
   <div class="row"><input id="q" placeholder="예: 그때 저장한 무료 GPU 옵션 뭐였지?" /></div>
-  <div class="row"><button id="askBtn">검색 + 답변</button><span id="askMsg" class="muted"></span></div>
+  <div class="row" style="flex-wrap:wrap;align-items:center">
+    <select id="range">
+      <option value="0">전체 기간</option>
+      <option value="1">최근 24시간</option>
+      <option value="7">최근 7일</option>
+      <option value="30">최근 30일</option>
+    </select>
+    <button id="askBtn">검색 + 답변</button>
+    <span id="askMsg" class="muted"></span>
+  </div>
+  <div id="topicChips" class="row" style="flex-wrap:wrap;gap:6px"></div>
   <div id="answer"></div>
   <div id="hits"></div>
 </div>
@@ -84,19 +94,48 @@ refreshStats();
 const BM = `javascript:(function(){var s=''+(window.getSelection?getSelection():'');var u='${API}/clip?title='+encodeURIComponent(document.title)+(s?'&text='+encodeURIComponent(s):'&url='+encodeURIComponent(location.href));window.open(u,'_blank');})();`;
 $("bm").href = BM;
 
-// file upload -> /ingest-file
+// PDF -> text in the browser via pdf.js (keyless). Scanned/image PDFs have no
+// text layer; for those, OCR client-side (e.g. Puter) and paste the result.
+let _pdfjs = null;
+async function pdfToText(file) {
+  if (!_pdfjs) {
+    _pdfjs = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs");
+    _pdfjs.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs";
+  }
+  const buf = await file.arrayBuffer();
+  const pdf = await _pdfjs.getDocument({ data: buf }).promise;
+  let text = "";
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    text += content.items.map((i) => i.str).join(" ") + "\n\n";
+  }
+  return text.trim();
+}
+
+// file upload -> /ingest-file (text formats) or client PDF extraction
 $("file").onchange = async (e) => {
   const files = [...e.target.files];
   for (const f of files) {
     $("addMsg").textContent = `📎 ${f.name} 처리 중…`;
     try {
-      const body = await f.text();
-      const r = await (await fetch(API + "/ingest-file?name=" + encodeURIComponent(f.name), { method: "POST", body })).json();
+      let r;
+      if (/\.pdf$/i.test(f.name)) {
+        const text = await pdfToText(f);
+        if (!text) throw new Error("텍스트 없음 (스캔본일 수 있음 — OCR 필요)");
+        r = await (await fetch(API + "/ingest", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, title: f.name.replace(/\.pdf$/i, "") }),
+        })).json();
+      } else {
+        const body = await f.text();
+        r = await (await fetch(API + "/ingest-file?name=" + encodeURIComponent(f.name), { method: "POST", body })).json();
+      }
       if (r.error) throw new Error(r.error);
       $("addMsg").textContent = `✓ ${f.name} — ${r.chunks} chunks`;
     } catch (err) { $("addMsg").textContent = "✗ " + f.name + ": " + err.message; }
   }
-  refreshStats(); e.target.value = "";
+  refreshStats(); loadTopics(); e.target.value = "";
 };
 
 // voice memo via the browser Web Speech API (keyless, no upload)
@@ -181,29 +220,75 @@ $("digestBtn").onclick = async () => {
     .replace(/^- /gm, "• ").replace(/\n/g, "<br>");
 };
 
+// ---- search UX: topic chips, date range, highlight ----
+let selectedTopic = null;
+async function loadTopics() {
+  const { topics } = await (await fetch(API + "/topics")).json();
+  const chip = (label, key, count) =>
+    `<a href="#" data-topic="${key ?? ""}" class="chip" style="text-decoration:none;border:1px solid #8886;border-radius:999px;padding:3px 10px;font-size:13px;${selectedTopic === key ? "background:#4f46e5;color:#fff" : ""}">${label}${count != null ? ` <span class="muted">${count}</span>` : ""}</a>`;
+  $("topicChips").innerHTML =
+    chip("전체", null) + topics.map((t) => chip(t.topic, t.topic, t.docs)).join("");
+  document.querySelectorAll("#topicChips .chip").forEach((a) => a.onclick = (e) => {
+    e.preventDefault();
+    selectedTopic = a.dataset.topic || null;
+    loadTopics();
+  });
+}
+loadTopics();
+
+const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+function highlight(text, query) {
+  const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])].filter((t) => t.length > 1);
+  let out = esc(text);
+  for (const t of terms) {
+    out = out.replace(new RegExp("(" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "gi"),
+      '<mark style="background:#fde68a;color:#000">$1</mark>');
+  }
+  return out;
+}
+function snippet(text, query, len = 220) {
+  const terms = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+  const lower = text.toLowerCase();
+  let at = -1;
+  for (const t of terms) { const i = lower.indexOf(t); if (i >= 0 && (at < 0 || i < at)) at = i; }
+  const start = Math.max(0, (at < 0 ? 0 : at) - 60);
+  return (start > 0 ? "…" : "") + text.slice(start, start + len) + (text.length > start + len ? "…" : "");
+}
+
 $("askBtn").onclick = async () => {
   const query = $("q").value.trim();
   if (!query) return;
   $("askBtn").disabled = true; $("askMsg").textContent = "검색 중…";
   $("answer").innerHTML = ""; $("hits").innerHTML = "";
   try {
-    const { hits } = await (await fetch(API + "/search", {
+    const days = Number($("range").value);
+    const body = { query, k: 5 };
+    if (selectedTopic) body.topic = selectedTopic;
+    if (days) body.since = new Date(Date.now() - days * 86400000).toISOString();
+
+    const { hits, filters } = await (await fetch(API + "/search", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, k: 5 }),
+      body: JSON.stringify(body),
     })).json();
 
-    if (!hits.length) { $("askMsg").textContent = "저장된 내용이 없어요."; $("askBtn").disabled = false; return; }
+    const scope = [selectedTopic && `주제: ${selectedTopic}`, days && `최근 ${days}일`].filter(Boolean).join(" · ");
+    if (!hits.length) { $("askMsg").textContent = `결과 없음${scope ? " (" + scope + ")" : ""}`; $("askBtn").disabled = false; return; }
 
-    // Show retrieved sources immediately.
-    $("hits").innerHTML = "<div class='muted' style='margin-top:12px'>참고한 조각:</div>" +
-      hits.map((h, i) => `<div class="src">[${i + 1}] ${h.title} (${(h.score).toFixed(2)})</div>`).join("");
+    // Retrieved chunks with highlighted snippets.
+    $("hits").innerHTML = `<div class='muted' style='margin-top:12px'>참고한 조각${scope ? " · " + scope : ""}:</div>` +
+      hits.map((h, i) => {
+        const link = h.source && /^https?:/.test(h.source) ? ` <a href="${h.source}" target="_blank">↗</a>` : "";
+        return `<div class="src" style="margin:8px 0">
+          [${i + 1}] <b>${esc(h.title)}</b> <span class="muted">${h.topic || ""} · ${(h.score).toFixed(2)}</span>${link}
+          <div style="font-size:13px;opacity:.9;margin-top:2px">${highlight(snippet(h.text, query), query)}</div></div>`;
+      }).join("");
 
     // Synthesize an answer with Puter (keyless, in-browser LLM).
     $("askMsg").textContent = "답변 생성 중…";
     const context = hits.map((h, i) => `[${i + 1}] (${h.title})\n${h.text}`).join("\n\n");
     const prompt = `아래 발췌만 근거로 질문에 한국어로 답하고, 문장 끝에 [번호] 출처를 달아줘. 근거가 없으면 모른다고 해.\n\n질문: ${query}\n\n발췌:\n${context}`;
     const resp = await puter.ai.chat(prompt, { model: "gpt-4o-mini" });
-    $("answer").innerHTML = `<div class="answer">${(resp?.message?.content || resp).toString()}</div>`;
+    $("answer").innerHTML = `<div class="answer" style="margin-top:10px">${esc((resp?.message?.content || resp).toString())}</div>`;
     $("askMsg").textContent = "";
   } catch (e) {
     $("askMsg").textContent = "✗ " + e.message + " (Puter 답변 단계는 브라우저에서만 동작)";

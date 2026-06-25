@@ -35,9 +35,18 @@ function cosine(a, b) {
   return dot; // vectors are L2-normalized, so dot product == cosine similarity
 }
 
-export function search(queryVec, k = 5) {
+function matches(r, f) {
+  if (f.topic && r.topic !== f.topic) return false;
+  if (f.kind && r.kind !== f.kind) return false;
+  if (f.since && !(r.ts >= f.since)) return false;
+  if (f.until && !(r.ts <= f.until)) return false;
+  return true;
+}
+
+export function search(queryVec, k = 5, filters = {}) {
   const rows = load();
   return rows
+    .filter((r) => matches(r, filters))
     .map((r) => ({ ...r, score: cosine(queryVec, r.vec) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, k)
@@ -48,6 +57,20 @@ export function stats() {
   const rows = load();
   const docs = new Set(rows.map((r) => r.docId));
   return { chunks: rows.length, docs: docs.size };
+}
+
+// Distinct topics with doc counts, for filter facets.
+export function topics() {
+  const rows = load();
+  const byTopic = new Map();
+  for (const r of rows) {
+    const t = r.topic || "메모";
+    if (!byTopic.has(t)) byTopic.set(t, new Set());
+    byTopic.get(t).add(r.docId);
+  }
+  return [...byTopic.entries()]
+    .map(([topic, docs]) => ({ topic, docs: docs.size }))
+    .sort((a, b) => b.docs - a.docs);
 }
 
 // Rows added at/after an ISO timestamp (vectors stripped), newest first.

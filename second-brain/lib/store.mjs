@@ -18,11 +18,14 @@ async function adapter() {
 export async function add(rows) {
   return (await adapter()).add(rows);
 }
-export async function search(queryVec, k = 5) {
-  return (await adapter()).search(queryVec, k);
+export async function search(queryVec, k = 5, filters = {}) {
+  return (await adapter()).search(queryVec, k, filters);
 }
 export async function stats() {
   return (await adapter()).stats();
+}
+export async function topics() {
+  return (await adapter()).topics();
 }
 export async function since(tsIso) {
   return (await adapter()).since(tsIso);

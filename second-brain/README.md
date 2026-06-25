@@ -66,6 +66,7 @@ EMBED_PROVIDER=hashing npm run smoke   # 네트워크 없이 전 과정 검증
 | 메모 | UI 텍스트박스 / `POST /ingest {text}` | — |
 | 웹 URL | UI URL칸 / `{url}` → Jina 추출 | — |
 | 파일 | UI 📎 또는 `POST /ingest-file?name=` (`.md/.txt/.html/.json/.csv`) | — |
+| PDF | UI 📎 — 브라우저 **pdf.js**로 텍스트 추출 후 저장 (스캔본은 OCR 필요) | — |
 | 원클릭 클립 | 🔖 북마클릿을 북마크바로 드래그 → 아무 페이지에서 선택분/URL 저장 | — |
 | 음성 메모 | UI 🎙️ — 브라우저 Web Speech API 받아쓰기(ko-KR) | — |
 | RSS/Atom | 관심 주제 등록 → 매일 자동 수집 | — |
@@ -122,6 +123,13 @@ SUMMARY=llm LLM_BASE_URL=https://api.groq.com/openai/v1 \
   node scripts/digest.mjs
 ```
 
+## 검색 UX
+
+물어보기 화면에서 **주제 칩**(`/topics` facet)과 **기간**(전체/24시간/7일/30일)으로
+범위를 좁히고, 결과 조각은 질의어가 **하이라이트된 스니펫**으로 보여줍니다. 필터는
+서버 `/search`의 `topic`/`since`/`until`/`kind` 파라미터로 전달되어, libSQL 백엔드에선
+SQL `WHERE`로 내려갑니다.
+
 ## API
 
 | 메서드 | 경로 | 바디 | 설명 |
@@ -129,7 +137,8 @@ SUMMARY=llm LLM_BASE_URL=https://api.groq.com/openai/v1 \
 | POST | `/ingest` | `{url}` 또는 `{text, title?, topic?}` | 메모/URL 저장 |
 | POST | `/ingest-file?name=` | 원시 파일 바이트 | `.md/.txt/.html/.json/.csv` 추출→저장 |
 | GET | `/clip?text=&title=` 또는 `?url=` | — | 북마클릿 원클릭 클립 |
-| POST | `/search` | `{query, k?}` | 의미 검색 (top-k 조각 + 출처) |
+| POST | `/search` | `{query, k?, topic?, since?, until?, kind?}` | 의미 검색 + 주제/기간/종류 필터 |
+| GET | `/topics` | — | 주제 facet (이름 + 문서 수) |
 | GET | `/stats` | — | 저장된 docs/chunks 수 |
 | GET/POST/DELETE | `/watches` | `{topic,url}` / `?id=` | 관심 주제 관리 |
 | POST | `/collect` | — | 모든 주제 폴링 후 새 글 ingest |
@@ -156,6 +165,7 @@ second-brain/
   scripts/smoke.mjs        # 오프라인 E2E (검색)
   scripts/smoke-daily.mjs  # 오프라인 E2E (수집→다이제스트)
   scripts/smoke-inputs.mjs # 오프라인 E2E (파일/클립 추출→저장)
+  scripts/smoke-search.mjs # 오프라인 E2E (주제/기간 필터 + facet)
   scripts/collect.mjs      # cron: 수집
   scripts/digest.mjs       # cron: 다이제스트 + 전송
   examples/github-actions-daily.yml

@@ -55,14 +55,30 @@ export async function add(rows) {
   return rows.length;
 }
 
-export async function search(queryVec, k = 5) {
+export async function search(queryVec, k = 5, filters = {}) {
   await ready();
-  const { rows } = await client().execute("SELECT * FROM chunks");
+  const where = [];
+  const args = [];
+  if (filters.topic) { where.push("topic = ?"); args.push(filters.topic); }
+  if (filters.kind) { where.push("kind = ?"); args.push(filters.kind); }
+  if (filters.since) { where.push("ts >= ?"); args.push(filters.since); }
+  if (filters.until) { where.push("ts <= ?"); args.push(filters.until); }
+  const sql = "SELECT * FROM chunks" + (where.length ? " WHERE " + where.join(" AND ") : "");
+  const { rows } = await client().execute({ sql, args });
   return rows
     .map((r) => ({ ...r, score: cosine(queryVec, JSON.parse(r.vec)) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, k)
     .map(({ vec, score, ...rest }) => ({ ...rest, score }));
+}
+
+export async function topics() {
+  await ready();
+  const { rows } = await client().execute(
+    `SELECT COALESCE(topic,'메모') AS topic, COUNT(DISTINCT docId) AS docs
+       FROM chunks GROUP BY COALESCE(topic,'메모') ORDER BY docs DESC`,
+  );
+  return rows.map((r) => ({ topic: r.topic, docs: Number(r.docs) }));
 }
 
 export async function stats() {
