@@ -8,6 +8,7 @@
 
 | 단계 | 사용 |
 |------|------|
+| 입력 채널 | 메모 · URL · **파일 업로드** · **원클릭 클립(북마클릿)** · **음성 메모(Web Speech)** |
 | 웹 추출 | **Jina Reader** (`r.jina.ai`, 키 없음) |
 | 임베딩 | **transformers.js** all-MiniLM-L6-v2 (로컬·키 없음·오프라인) |
 | 저장/검색 | NDJSON(기본) 또는 **libSQL/Turso**(영구무료, 멀티기기) + 코사인 |
@@ -57,6 +58,20 @@ EMBED_PROVIDER=hashing npm run smoke   # 네트워크 없이 전 과정 검증
 > 참고: 이 저장소가 만들어진 샌드박스에선 egress 정책으로 `huggingface.co`와
 > `r.jina.ai`가 차단되어, 검증은 `hashing` 공급자(오프라인)로 수행했습니다.
 > 로컬/일반 환경에선 `local`(MiniLM)과 Jina 추출이 그대로 동작합니다.
+
+## 입력 채널 (많이 넣을수록 강해짐)
+
+| 채널 | 방법 | 키 |
+|------|------|----|
+| 메모 | UI 텍스트박스 / `POST /ingest {text}` | — |
+| 웹 URL | UI URL칸 / `{url}` → Jina 추출 | — |
+| 파일 | UI 📎 또는 `POST /ingest-file?name=` (`.md/.txt/.html/.json/.csv`) | — |
+| 원클릭 클립 | 🔖 북마클릿을 북마크바로 드래그 → 아무 페이지에서 선택분/URL 저장 | — |
+| 음성 메모 | UI 🎙️ — 브라우저 Web Speech API 받아쓰기(ko-KR) | — |
+| RSS/Atom | 관심 주제 등록 → 매일 자동 수집 | — |
+
+> PDF/문서 등 바이너리는 서버 추출 대상이 아닙니다 — 클라이언트(예: Puter OCR)에서
+> 텍스트로 바꿔 `/ingest`로 보내세요.
 
 ## 매일 여는 앱 — 자동 수집 + 다이제스트
 
@@ -111,7 +126,9 @@ SUMMARY=llm LLM_BASE_URL=https://api.groq.com/openai/v1 \
 
 | 메서드 | 경로 | 바디 | 설명 |
 |--------|------|------|------|
-| POST | `/ingest` | `{url}` 또는 `{text, title?}` | 추출→청킹→임베딩→저장 |
+| POST | `/ingest` | `{url}` 또는 `{text, title?, topic?}` | 메모/URL 저장 |
+| POST | `/ingest-file?name=` | 원시 파일 바이트 | `.md/.txt/.html/.json/.csv` 추출→저장 |
+| GET | `/clip?text=&title=` 또는 `?url=` | — | 북마클릿 원클릭 클립 |
 | POST | `/search` | `{query, k?}` | 의미 검색 (top-k 조각 + 출처) |
 | GET | `/stats` | — | 저장된 docs/chunks 수 |
 | GET/POST/DELETE | `/watches` | `{topic,url}` / `?id=` | 관심 주제 관리 |
@@ -128,6 +145,8 @@ second-brain/
   lib/store-ndjson.mjs     # NDJSON 어댑터 (의존성 0)
   lib/store-libsql.mjs     # libSQL/Turso 어댑터 (로컬 file: / 원격)
   lib/ingest.mjs           # Jina 추출 + 청킹
+  lib/pipeline.mjs         # 공용 ingest 파이프라인 (모든 입력 채널 공유)
+  lib/extract.mjs          # 파일 텍스트 추출 (md/html/json/csv)
   lib/feeds.mjs            # 관심 주제(구독) 관리 + seen 중복 제거
   lib/feedparse.mjs        # 의존성 0 RSS/Atom 파서
   lib/collect.mjs          # 폴링 → 새 글만 ingest
@@ -136,6 +155,7 @@ second-brain/
   public/index.html        # UI + Puter.js 답변 합성
   scripts/smoke.mjs        # 오프라인 E2E (검색)
   scripts/smoke-daily.mjs  # 오프라인 E2E (수집→다이제스트)
+  scripts/smoke-inputs.mjs # 오프라인 E2E (파일/클립 추출→저장)
   scripts/collect.mjs      # cron: 수집
   scripts/digest.mjs       # cron: 다이제스트 + 전송
   examples/github-actions-daily.yml

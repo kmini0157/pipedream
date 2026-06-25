@@ -2,11 +2,12 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { embed, embedOne } from "./lib/embed.mjs";
-import { add, search, stats } from "./lib/store.mjs";
-import { fetchUrlText, chunk } from "./lib/ingest.mjs";
+import { search, stats } from "./lib/store.mjs";
 import * as feeds from "./lib/feeds.mjs";
 import { collectAll } from "./lib/collect.mjs";
 import { buildDigest } from "./lib/digest.mjs";
+import { storeDoc, storeUrl } from "./lib/pipeline.mjs";
+import { extractText } from "./lib/extract.mjs";
 
 const PORT = process.env.PORT || 8787;
 const PUBLIC = new URL("./public/", import.meta.url).pathname;
@@ -21,50 +22,56 @@ function json(res, code, body) {
   res.end(data);
 }
 
-function readBody(req) {
+function readText(req) {
   return new Promise((resolve, reject) => {
     let raw = "";
     req.on("data", (c) => (raw += c));
-    req.on("end", () => {
-      try {
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch (e) {
-        reject(e);
-      }
-    });
+    req.on("end", () => resolve(raw));
+    req.on("error", reject);
   });
 }
 
-let docCounter = Date.now();
+async function readBody(req) {
+  const raw = await readText(req);
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    throw e;
+  }
+}
 
 async function handleIngest(req, res) {
-  const { url, text, title } = await readBody(req);
-  let body = text;
-  let docTitle = title;
-  let source = title || "note";
+  const { url, text, title, topic } = await readBody(req);
+  const result = url
+    ? await storeUrl(url, { title, topic })
+    : await storeDoc({ text, title, topic, kind: "note" });
+  json(res, 200, { ok: true, ...result });
+}
 
-  if (url) {
-    const fetched = await fetchUrlText(url);
-    body = fetched.text;
-    docTitle = title || fetched.title;
-    source = url;
+// File upload: raw bytes in body, ?name=foo.md for the filename.
+async function handleIngestFile(req, res) {
+  const name = new URL(req.url, "http://x").searchParams.get("name") || "upload.txt";
+  const content = await readText(req);
+  const { title, text } = extractText(name, content);
+  const result = await storeDoc({ text, title, source: name, kind: "file" });
+  json(res, 200, { ok: true, ...result });
+}
+
+// One-click clip (bookmarklet target): GET /clip?text=&title= or ?url=
+async function handleClip(req, res) {
+  const q = new URL(req.url, "http://x").searchParams;
+  try {
+    const result = q.get("url")
+      ? await storeUrl(q.get("url"), { title: q.get("title") || undefined })
+      : await storeDoc({ text: q.get("text"), title: q.get("title") || "클립", kind: "clip" });
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(`<!doctype html><meta charset=utf-8><body style="font:16px system-ui;padding:40px">
+      ✅ 저장됨: <b>${result.title}</b> (${result.chunks} chunks)<br><br>
+      <a href="javascript:history.back()">← 돌아가기</a></body>`);
+  } catch (e) {
+    res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(`<meta charset=utf-8>✗ ${e.message}`);
   }
-  if (!body || !body.trim()) return json(res, 400, { error: "url or text required" });
-
-  const docId = "d" + ++docCounter;
-  const chunks = chunk(body);
-  const vecs = await embed(chunks);
-  const rows = chunks.map((text, i) => ({
-    id: `${docId}-${i}`,
-    docId,
-    source,
-    title: docTitle || source,
-    text,
-    vec: vecs[i],
-    ts: new Date().toISOString(),
-  }));
-  await add(rows);
-  json(res, 200, { ok: true, docId, title: docTitle, chunks: rows.length });
 }
 
 async function handleSearch(req, res) {
@@ -121,6 +128,8 @@ const server = createServer(async (req, res) => {
   try {
     if (req.method === "OPTIONS") return json(res, 204, {});
     if (req.method === "POST" && req.url === "/ingest") return handleIngest(req, res);
+    if (req.method === "POST" && req.url.startsWith("/ingest-file")) return handleIngestFile(req, res);
+    if (req.method === "GET" && req.url.startsWith("/clip")) return handleClip(req, res);
     if (req.method === "POST" && req.url === "/search") return handleSearch(req, res);
     if (req.method === "GET" && req.url === "/stats") return json(res, 200, await stats());
     if (req.url.startsWith("/watches")) return handleWatches(req, res);

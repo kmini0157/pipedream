@@ -9,7 +9,8 @@
     "collect": "node scripts/collect.mjs",
     "digest": "node scripts/digest.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "smoke:daily": "node scripts/smoke-daily.mjs"
+    "smoke:daily": "node scripts/smoke-daily.mjs",
+    "smoke:inputs": "node scripts/smoke-inputs.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",

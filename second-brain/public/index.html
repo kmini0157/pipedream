@@ -31,7 +31,18 @@
   <strong>＋ 추가하기</strong>
   <div class="row"><input id="url" placeholder="https://… (웹페이지 URL — Jina로 추출)" /></div>
   <div class="row"><textarea id="text" placeholder="또는 직접 메모/텍스트 붙여넣기"></textarea></div>
-  <div class="row"><button id="addBtn">저장</button><span id="addMsg" class="muted"></span></div>
+  <div class="row">
+    <button id="addBtn">저장</button>
+    <button id="micBtn" style="background:#7c3aed" title="브라우저 음성 인식">🎙️ 음성</button>
+    <label class="pill" style="cursor:pointer">📎 파일<input id="file" type="file" accept=".md,.markdown,.txt,.html,.htm,.json,.csv,.log" multiple hidden /></label>
+    <span id="addMsg" class="muted"></span>
+  </div>
+</div>
+
+<div class="card">
+  <strong>🔖 원클릭 클립</strong>
+  <p class="muted">아래 버튼을 <b>북마크바로 드래그</b>하세요. 웹서핑 중 텍스트를 선택하고 누르면 선택분이, 없으면 그 페이지가 통째로 저장됩니다.</p>
+  <div class="row"><a id="bm" href="#" style="display:inline-block;padding:8px 14px;border:1px dashed #888;border-radius:8px;text-decoration:none">🧠 Clip to Brain</a></div>
 </div>
 
 <div class="card">
@@ -68,6 +79,46 @@ async function refreshStats() {
     $("stats").textContent = `${s.docs} docs · ${s.chunks} chunks`; } catch {}
 }
 refreshStats();
+
+// bookmarklet: capture selection (or the page URL) into this brain
+const BM = `javascript:(function(){var s=''+(window.getSelection?getSelection():'');var u='${API}/clip?title='+encodeURIComponent(document.title)+(s?'&text='+encodeURIComponent(s):'&url='+encodeURIComponent(location.href));window.open(u,'_blank');})();`;
+$("bm").href = BM;
+
+// file upload -> /ingest-file
+$("file").onchange = async (e) => {
+  const files = [...e.target.files];
+  for (const f of files) {
+    $("addMsg").textContent = `📎 ${f.name} 처리 중…`;
+    try {
+      const body = await f.text();
+      const r = await (await fetch(API + "/ingest-file?name=" + encodeURIComponent(f.name), { method: "POST", body })).json();
+      if (r.error) throw new Error(r.error);
+      $("addMsg").textContent = `✓ ${f.name} — ${r.chunks} chunks`;
+    } catch (err) { $("addMsg").textContent = "✗ " + f.name + ": " + err.message; }
+  }
+  refreshStats(); e.target.value = "";
+};
+
+// voice memo via the browser Web Speech API (keyless, no upload)
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, finalText = "";
+$("micBtn").onclick = () => {
+  if (!SR) { $("addMsg").textContent = "이 브라우저는 음성 인식 미지원 (Chrome 권장)"; return; }
+  if (rec) { rec.stop(); return; }              // toggle off
+  rec = new SR(); finalText = $("text").value ? $("text").value + " " : "";
+  rec.lang = "ko-KR"; rec.interimResults = true; rec.continuous = true;
+  rec.onresult = (ev) => {
+    let interim = "";
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const t = ev.results[i][0].transcript;
+      if (ev.results[i].isFinal) finalText += t + " "; else interim += t;
+    }
+    $("text").value = (finalText + interim).trim();
+  };
+  rec.onend = () => { rec = null; $("micBtn").textContent = "🎙️ 음성"; $("addMsg").textContent = finalText.trim() ? "받아쓰기 완료 — 저장 누르기" : ""; };
+  rec.onerror = (e) => { $("addMsg").textContent = "음성 오류: " + e.error; };
+  $("micBtn").textContent = "⏹️ 중지"; $("addMsg").textContent = "듣는 중…"; rec.start();
+};
 
 $("addBtn").onclick = async () => {
   const url = $("url").value.trim(), text = $("text").value.trim();
