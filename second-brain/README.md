@@ -91,8 +91,21 @@ NOTIFY=ntfy NTFY_TOPIC=my-secret-topic node scripts/digest.mjs
 - **crontab**: `0 7 * * * cd /path/second-brain && node scripts/collect.mjs && NOTIFY=ntfy NTFY_TOPIC=... node scripts/digest.mjs`
 - **n8n**: Cron 노드 → HTTP Request 노드로 `POST /collect` 후 `GET /digest`.
 
-요약은 기본이 **추출식**(키 없음·오프라인)입니다. 더 매끄러운 요약이 필요하면
-`lib/digest.mjs`의 요약 단계를 Puter/LLM 호출로 교체하면 됩니다.
+### 요약 품질 (`SUMMARY`)
+
+| 값 | 설정 | 비고 |
+|----|------|------|
+| `extractive` (기본) | — | 문장 추출, 키 없음·오프라인 |
+| `llm` | `LLM_BASE_URL` (+`LLM_API_KEY`,`LLM_MODEL`) | OpenAI 호환 엔드포인트로 매끄러운 요약. **오류 시 추출식으로 자동 폴백** |
+
+무료 OpenAI 호환 옵션 예: **Groq**(`https://api.groq.com/openai/v1`),
+**OpenRouter**(`...:free` 모델). 자세한 값은 `.env.example` 참고.
+
+```bash
+SUMMARY=llm LLM_BASE_URL=https://api.groq.com/openai/v1 \
+  LLM_API_KEY=gsk_... LLM_MODEL=llama-3.3-70b-versatile \
+  node scripts/digest.mjs
+```
 
 ## API
 

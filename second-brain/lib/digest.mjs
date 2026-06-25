@@ -1,6 +1,46 @@
 // Build a daily digest from everything ingested since a cutoff.
-// Summaries are extractive (keyless, offline). Swap in an LLM later if wanted.
+// Summaries default to extractive (keyless, offline); set SUMMARY=llm with an
+// OpenAI-compatible endpoint (Groq/OpenRouter free tiers, local, etc.) for
+// fluent prose. The LLM path falls back to extractive on any error.
 import { since } from "./store.mjs";
+
+// Returns an async (text) => summary. Picks LLM or extractive once per build.
+function makeSummarizer() {
+  const useLLM = (process.env.SUMMARY || "extractive") === "llm" && process.env.LLM_BASE_URL;
+  if (!useLLM) return async (text) => extractive(text);
+  return async (text) => {
+    try {
+      return await summarizeLLM(text);
+    } catch {
+      return extractive(text); // graceful fallback keeps the digest flowing
+    }
+  };
+}
+
+async function summarizeLLM(text) {
+  const base = process.env.LLM_BASE_URL.replace(/\/$/, "");
+  const res = await fetch(`${base}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(process.env.LLM_API_KEY ? { Authorization: `Bearer ${process.env.LLM_API_KEY}` } : {}),
+    },
+    body: JSON.stringify({
+      model: process.env.LLM_MODEL || "gpt-4o-mini",
+      temperature: 0.2,
+      max_tokens: 160,
+      messages: [
+        { role: "system", content: "너는 한국어 뉴스 요약가다. 핵심만 1-2문장으로, 군더더기 없이 요약한다." },
+        { role: "user", content: `다음 글을 1-2문장으로 요약해줘:\n\n${text.slice(0, 4000)}` },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error("llm " + res.status);
+  const data = await res.json();
+  const out = data?.choices?.[0]?.message?.content?.trim();
+  if (!out) throw new Error("empty llm response");
+  return out;
+}
 
 function sentences(text) {
   return text
@@ -38,16 +78,22 @@ function groupDocs(rows) {
 export async function buildDigest(sinceIso, dateLabel) {
   const rows = await since(sinceIso);
   const docs = groupDocs(rows);
+  const summarize = makeSummarizer();
 
-  const byTopic = new Map();
-  for (const d of docs) {
-    const t = d.topic || "메모";
-    if (!byTopic.has(t)) byTopic.set(t, []);
-    byTopic.get(t).push({
+  // Summarize entries concurrently (matters for the LLM path).
+  const entries = await Promise.all(
+    docs.map(async (d) => ({
+      topic: d.topic || "메모",
       title: d.title,
       source: d.source,
-      summary: extractive(d.parts.join(" ")),
-    });
+      summary: await summarize(d.parts.join(" ")),
+    })),
+  );
+
+  const byTopic = new Map();
+  for (const e of entries) {
+    if (!byTopic.has(e.topic)) byTopic.set(e.topic, []);
+    byTopic.get(e.topic).push(e);
   }
 
   const lines = [`# 🧠 오늘의 다이제스트 — ${dateLabel}`, ""];
