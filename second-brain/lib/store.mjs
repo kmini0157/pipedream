@@ -1,6 +1,6 @@
 // Pluggable vector store façade. STORE=ndjson (default) | libsql.
 //   ndjson — zero-dependency NDJSON file, single machine.
-//   libsql — libSQL/Turso (local file: URL or remote libsql:// for multi-device).
+//   libsql — libSQL/Turso with a native vector index (local file: or remote).
 // All methods are async so either adapter (sync or async) works behind one API.
 const STORE = process.env.STORE || "ndjson";
 
@@ -27,7 +27,25 @@ export async function stats() {
 export async function topics() {
   return (await adapter()).topics();
 }
+export async function tagFacet() {
+  return (await adapter()).tagFacet();
+}
 export async function since(tsIso) {
   return (await adapter()).since(tsIso);
+}
+export async function setTags(docId, tags) {
+  return (await adapter()).setTags(docId, tags);
+}
+export async function setFav(docId, fav) {
+  return (await adapter()).setFav(docId, fav);
+}
+export async function deleteDocs(docIds) {
+  return (await adapter()).deleteDocs(docIds);
+}
+export async function listDocs(filters = {}) {
+  return (await adapter()).listDocs(filters);
+}
+export async function docCentroids() {
+  return (await adapter()).docCentroids();
 }
 export const backend = STORE;

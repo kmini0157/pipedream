@@ -10,9 +10,18 @@ function newDocId() {
   return "d" + Date.now().toString(36) + _seq.toString(36);
 }
 
-export async function storeDoc({ text, title, source, topic, kind = "note" }) {
+// Stable hash of normalized full text, for exact-duplicate detection.
+function contentHash(text) {
+  const norm = text.toLowerCase().replace(/\s+/g, " ").trim();
+  let h = 5381;
+  for (let i = 0; i < norm.length; i++) h = (Math.imul(33, h) + norm.charCodeAt(i)) | 0;
+  return "h" + (h >>> 0).toString(36) + ":" + norm.length;
+}
+
+export async function storeDoc({ text, title, source, topic, kind = "note", tags = [], fav = 0 }) {
   if (!text || !text.trim()) throw new Error("empty text");
   const docId = newDocId();
+  const hash = contentHash(text);
   const chunks = chunk(text);
   const vecs = await embed(chunks);
   const rows = chunks.map((c, i) => ({
@@ -20,6 +29,9 @@ export async function storeDoc({ text, title, source, topic, kind = "note" }) {
     docId,
     kind,
     topic: topic || null,
+    tags: Array.isArray(tags) ? tags : [],
+    fav: fav ? 1 : 0,
+    contentHash: hash,
     source: source || title || "note",
     title: title || source || "note",
     text: c,
@@ -31,7 +43,7 @@ export async function storeDoc({ text, title, source, topic, kind = "note" }) {
 }
 
 // Fetch a URL via Jina (keyless) then store it.
-export async function storeUrl(url, { title, topic } = {}) {
+export async function storeUrl(url, { title, topic, tags } = {}) {
   const fetched = await fetchUrlText(url);
-  return storeDoc({ text: fetched.text, title: title || fetched.title, source: url, topic, kind: "web" });
+  return storeDoc({ text: fetched.text, title: title || fetched.title, source: url, topic, tags, kind: "web" });
 }

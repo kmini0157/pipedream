@@ -37,6 +37,12 @@ npm start              # http://localhost:8787 접속
 로컬 `file:`과 원격 Turso는 **완전히 같은 코드 경로**입니다. 로컬에서 검증한 뒤
 URL만 바꾸면 여러 기기에서 같은 지식을 공유합니다.
 
+**대용량 가속**: libSQL 백엔드는 `F32_BLOB(384)` 컬럼 + `libsql_vector_idx`
+네이티브 벡터 인덱스를 만들고 `vector_top_k`(ANN)로 검색합니다 — 전체 행을 읽어
+JS에서 코사인을 도는 대신 인덱스로 상위 후보만 가져옵니다. 필터(주제/태그/기간)는
+`vector_top_k` 결과에 SQL `WHERE`로 결합됩니다. 네이티브 함수가 없는 빌드에서는
+자동으로 JS 코사인 폴백으로 내려갑니다(ndjson은 항상 JS 코사인).
+
 ```bash
 # 로컬 SQLite 로 전환
 STORE=libsql LIBSQL_URL=file:data/store.db npm start
@@ -123,6 +129,16 @@ SUMMARY=llm LLM_BASE_URL=https://api.groq.com/openai/v1 \
   node scripts/digest.mjs
 ```
 
+## 정리 & 조직
+
+- **자유 태그**: 주제(단일)와 별개로 문서마다 여러 태그를 달 수 있습니다. 추가
+  화면의 태그 입력란(쉼표 구분) 또는 `POST /tag`. 검색에서 `#태그` 칩으로 필터링.
+- **즐겨찾기**: 라이브러리(📚)에서 ☆/⭐ 토글, 또는 `POST /fav`. 검색에서 "⭐
+  즐겨찾기만" 체크.
+- **중복 정리**(🧹): `완전 동일`(contentHash)과 `유사`(센트로이드 코사인 ≥ 임계값)
+  문서를 한 클러스터로 묶어 보여주고, 한 번에 병합합니다. 병합 시 태그는 합집합,
+  즐겨찾기는 OR로 보존되고 나머지 문서는 삭제됩니다.
+
 ## 검색 UX
 
 물어보기 화면에서 **주제 칩**(`/topics` facet)과 **기간**(전체/24시간/7일/30일)으로
@@ -137,8 +153,14 @@ SQL `WHERE`로 내려갑니다.
 | POST | `/ingest` | `{url}` 또는 `{text, title?, topic?}` | 메모/URL 저장 |
 | POST | `/ingest-file?name=` | 원시 파일 바이트 | `.md/.txt/.html/.json/.csv` 추출→저장 |
 | GET | `/clip?text=&title=` 또는 `?url=` | — | 북마클릿 원클릭 클립 |
-| POST | `/search` | `{query, k?, topic?, since?, until?, kind?}` | 의미 검색 + 주제/기간/종류 필터 |
+| POST | `/search` | `{query, k?, topic?, tag?, fav?, since?, until?, kind?}` | 의미 검색 + 주제/태그/즐겨찾기/기간 필터 |
 | GET | `/topics` | — | 주제 facet (이름 + 문서 수) |
+| GET | `/tags` | — | 태그 facet (이름 + 문서 수) |
+| GET | `/docs` | `?tag=&topic=&fav=1` | 문서 목록 (즐겨찾기/태그/주제 필터) |
+| POST | `/tag` | `{docId, tags[]}` | 문서 태그 설정 |
+| POST | `/fav` | `{docId, fav}` | 즐겨찾기 토글 |
+| GET | `/duplicates` | `?threshold=0.92` | 중복/유사 문서 클러스터 탐지 |
+| POST | `/merge` | `{keepDocId, dropDocIds[]}` | 클러스터 병합 (태그 합집합) |
 | GET | `/stats` | — | 저장된 docs/chunks 수 |
 | GET/POST/DELETE | `/watches` | `{topic,url}` / `?id=` | 관심 주제 관리 |
 | POST | `/collect` | — | 모든 주제 폴링 후 새 글 ingest |
@@ -152,7 +174,8 @@ second-brain/
   lib/embed.mjs            # 플러그러블 임베딩 (local | hashing)
   lib/store.mjs            # 스토어 façade (ndjson | libsql 선택)
   lib/store-ndjson.mjs     # NDJSON 어댑터 (의존성 0)
-  lib/store-libsql.mjs     # libSQL/Turso 어댑터 (로컬 file: / 원격)
+  lib/store-libsql.mjs     # libSQL/Turso 어댑터 (네이티브 벡터 인덱스 + 폴백)
+  lib/dedup.mjs            # 중복/유사 문서 클러스터링 + 병합
   lib/ingest.mjs           # Jina 추출 + 청킹
   lib/pipeline.mjs         # 공용 ingest 파이프라인 (모든 입력 채널 공유)
   lib/extract.mjs          # 파일 텍스트 추출 (md/html/json/csv)
@@ -166,6 +189,9 @@ second-brain/
   scripts/smoke-daily.mjs  # 오프라인 E2E (수집→다이제스트)
   scripts/smoke-inputs.mjs # 오프라인 E2E (파일/클립 추출→저장)
   scripts/smoke-search.mjs # 오프라인 E2E (주제/기간 필터 + facet)
+  scripts/smoke-tags.mjs   # 오프라인 E2E (태그·즐겨찾기)
+  scripts/smoke-dedup.mjs  # 오프라인 E2E (중복 탐지·병합)
+  scripts/smoke-vector.mjs # libSQL 네이티브 벡터 패리티 (STORE=libsql)
   scripts/collect.mjs      # cron: 수집
   scripts/digest.mjs       # cron: 다이제스트 + 전송
   examples/github-actions-daily.yml

@@ -2,12 +2,13 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { embed, embedOne } from "./lib/embed.mjs";
-import { search, stats, topics } from "./lib/store.mjs";
+import { search, stats, topics, tagFacet, setTags, setFav, listDocs } from "./lib/store.mjs";
 import * as feeds from "./lib/feeds.mjs";
 import { collectAll } from "./lib/collect.mjs";
 import { buildDigest } from "./lib/digest.mjs";
 import { storeDoc, storeUrl } from "./lib/pipeline.mjs";
 import { extractText } from "./lib/extract.mjs";
+import { findDuplicates, merge } from "./lib/dedup.mjs";
 
 const PORT = process.env.PORT || 8787;
 const PUBLIC = new URL("./public/", import.meta.url).pathname;
@@ -41,10 +42,10 @@ async function readBody(req) {
 }
 
 async function handleIngest(req, res) {
-  const { url, text, title, topic } = await readBody(req);
+  const { url, text, title, topic, tags } = await readBody(req);
   const result = url
-    ? await storeUrl(url, { title, topic })
-    : await storeDoc({ text, title, topic, kind: "note" });
+    ? await storeUrl(url, { title, topic, tags })
+    : await storeDoc({ text, title, topic, tags, kind: "note" });
   json(res, 200, { ok: true, ...result });
 }
 
@@ -75,16 +76,53 @@ async function handleClip(req, res) {
 }
 
 async function handleSearch(req, res) {
-  const { query, k, topic, since, until, kind } = await readBody(req);
+  const { query, k, topic, since, until, kind, tag, fav } = await readBody(req);
   if (!query) return json(res, 400, { error: "query required" });
   const qv = await embedOne(query);
   const filters = {};
   if (topic) filters.topic = topic;
   if (kind) filters.kind = kind;
+  if (tag) filters.tag = tag;
+  if (fav) filters.fav = 1;
   if (since) filters.since = since;
   if (until) filters.until = until;
   const hits = await search(qv, k || 5, filters);
   json(res, 200, { query, filters, hits });
+}
+
+// Document-level metadata + dedup endpoints.
+async function handleTag(req, res) {
+  const { docId, tags } = await readBody(req);
+  if (!docId || !Array.isArray(tags)) return json(res, 400, { error: "docId and tags[] required" });
+  const n = await setTags(docId, tags.map((t) => String(t).trim()).filter(Boolean));
+  json(res, 200, { ok: true, updated: n });
+}
+
+async function handleFav(req, res) {
+  const { docId, fav } = await readBody(req);
+  if (!docId) return json(res, 400, { error: "docId required" });
+  const n = await setFav(docId, !!fav);
+  json(res, 200, { ok: true, updated: n, fav: !!fav });
+}
+
+async function handleDocs(req, res) {
+  const q = new URL(req.url, "http://x").searchParams;
+  const filters = {};
+  if (q.get("tag")) filters.tag = q.get("tag");
+  if (q.get("topic")) filters.topic = q.get("topic");
+  if (q.get("fav")) filters.fav = 1;
+  json(res, 200, { docs: await listDocs(filters) });
+}
+
+async function handleDuplicates(req, res) {
+  const t = Number(new URL(req.url, "http://x").searchParams.get("threshold") || 0.92);
+  json(res, 200, { threshold: t, groups: await findDuplicates(t) });
+}
+
+async function handleMerge(req, res) {
+  const { keepDocId, dropDocIds } = await readBody(req);
+  if (!keepDocId || !Array.isArray(dropDocIds)) return json(res, 400, { error: "keepDocId and dropDocIds[] required" });
+  json(res, 200, { ok: true, ...(await merge(keepDocId, dropDocIds)) });
 }
 
 async function handleWatches(req, res) {
@@ -138,6 +176,12 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/search") return handleSearch(req, res);
     if (req.method === "GET" && req.url === "/stats") return json(res, 200, await stats());
     if (req.method === "GET" && req.url === "/topics") return json(res, 200, { topics: await topics() });
+    if (req.method === "GET" && req.url === "/tags") return json(res, 200, { tags: await tagFacet() });
+    if (req.method === "POST" && req.url === "/tag") return handleTag(req, res);
+    if (req.method === "POST" && req.url === "/fav") return handleFav(req, res);
+    if (req.method === "GET" && req.url.startsWith("/docs")) return handleDocs(req, res);
+    if (req.method === "GET" && req.url.startsWith("/duplicates")) return handleDuplicates(req, res);
+    if (req.method === "POST" && req.url === "/merge") return handleMerge(req, res);
     if (req.url.startsWith("/watches")) return handleWatches(req, res);
     if (req.method === "POST" && req.url === "/collect") return handleCollect(req, res);
     if (req.method === "GET" && req.url.startsWith("/digest")) return handleDigest(req, res);

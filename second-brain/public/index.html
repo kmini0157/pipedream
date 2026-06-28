@@ -31,6 +31,7 @@
   <strong>＋ 추가하기</strong>
   <div class="row"><input id="url" placeholder="https://… (웹페이지 URL — Jina로 추출)" /></div>
   <div class="row"><textarea id="text" placeholder="또는 직접 메모/텍스트 붙여넣기"></textarea></div>
+  <div class="row"><input id="tags" placeholder="태그 (쉼표로 구분, 예: gpu, 무료, 리서치)" /></div>
   <div class="row">
     <button id="addBtn">저장</button>
     <button id="micBtn" style="background:#7c3aed" title="브라우저 음성 인식">🎙️ 음성</button>
@@ -75,9 +76,24 @@
     <button id="askBtn">검색 + 답변</button>
     <span id="askMsg" class="muted"></span>
   </div>
+  <label class="muted" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="favOnly" style="width:auto" /> ⭐ 즐겨찾기만</label>
   <div id="topicChips" class="row" style="flex-wrap:wrap;gap:6px"></div>
+  <div id="tagChips" class="row" style="flex-wrap:wrap;gap:6px"></div>
   <div id="answer"></div>
   <div id="hits"></div>
+</div>
+
+<div class="card">
+  <strong>📚 라이브러리</strong>
+  <div class="row"><button id="libBtn">문서 목록</button><button id="libFavBtn" style="background:#0891b2">⭐ 즐겨찾기</button><span id="libMsg" class="muted"></span></div>
+  <div id="libList"></div>
+</div>
+
+<div class="card">
+  <strong>🧹 중복 정리</strong>
+  <p class="muted">완전 동일하거나 의미가 거의 같은 문서를 찾아 하나로 합칩니다.</p>
+  <div class="row"><button id="dupBtn">중복 찾기</button><span id="dupMsg" class="muted"></span></div>
+  <div id="dupList"></div>
 </div>
 
 <script>
@@ -159,18 +175,22 @@ $("micBtn").onclick = () => {
   $("micBtn").textContent = "⏹️ 중지"; $("addMsg").textContent = "듣는 중…"; rec.start();
 };
 
+const parseTags = (s) => s.split(",").map((t) => t.trim()).filter(Boolean);
+
 $("addBtn").onclick = async () => {
   const url = $("url").value.trim(), text = $("text").value.trim();
   if (!url && !text) return;
+  const tags = parseTags($("tags").value);
   $("addBtn").disabled = true; $("addMsg").textContent = "처리 중…";
   try {
     const r = await (await fetch(API + "/ingest", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: url || undefined, text: text || undefined }),
+      body: JSON.stringify({ url: url || undefined, text: text || undefined, tags }),
     })).json();
     if (r.error) throw new Error(r.error);
     $("addMsg").textContent = `✓ "${r.title}" — ${r.chunks} chunks 저장됨`;
-    $("url").value = ""; $("text").value = ""; refreshStats();
+    $("url").value = ""; $("text").value = ""; $("tags").value = "";
+    refreshStats(); loadTopics(); loadTags();
   } catch (e) { $("addMsg").textContent = "✗ " + e.message; }
   $("addBtn").disabled = false;
 };
@@ -236,6 +256,23 @@ async function loadTopics() {
 }
 loadTopics();
 
+let selectedTag = null;
+async function loadTags() {
+  const { tags } = await (await fetch(API + "/tags")).json();
+  if (!tags.length) { $("tagChips").innerHTML = ""; return; }
+  const chip = (label, key, count) =>
+    `<a href="#" data-tag="${key ?? ""}" class="tchip" style="text-decoration:none;border:1px solid #8886;border-radius:999px;padding:3px 10px;font-size:13px;${selectedTag === key ? "background:#0891b2;color:#fff" : ""}">#${label}${count != null ? ` <span class="muted">${count}</span>` : ""}</a>`;
+  $("tagChips").innerHTML =
+    `<span class="muted" style="align-self:center">태그:</span>` +
+    chip("전체", null) + tags.map((t) => chip(t.tag, t.tag, t.docs)).join("");
+  document.querySelectorAll("#tagChips .tchip").forEach((a) => a.onclick = (e) => {
+    e.preventDefault();
+    selectedTag = a.dataset.tag || null;
+    loadTags();
+  });
+}
+loadTags();
+
 const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 function highlight(text, query) {
   const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])].filter((t) => t.length > 1);
@@ -264,6 +301,8 @@ $("askBtn").onclick = async () => {
     const days = Number($("range").value);
     const body = { query, k: 5 };
     if (selectedTopic) body.topic = selectedTopic;
+    if (selectedTag) body.tag = selectedTag;
+    if ($("favOnly").checked) body.fav = true;
     if (days) body.since = new Date(Date.now() - days * 86400000).toISOString();
 
     const { hits, filters } = await (await fetch(API + "/search", {
@@ -271,7 +310,7 @@ $("askBtn").onclick = async () => {
       body: JSON.stringify(body),
     })).json();
 
-    const scope = [selectedTopic && `주제: ${selectedTopic}`, days && `최근 ${days}일`].filter(Boolean).join(" · ");
+    const scope = [selectedTopic && `주제: ${selectedTopic}`, selectedTag && `#${selectedTag}`, $("favOnly").checked && "⭐", days && `최근 ${days}일`].filter(Boolean).join(" · ");
     if (!hits.length) { $("askMsg").textContent = `결과 없음${scope ? " (" + scope + ")" : ""}`; $("askBtn").disabled = false; return; }
 
     // Retrieved chunks with highlighted snippets.
@@ -294,6 +333,54 @@ $("askBtn").onclick = async () => {
     $("askMsg").textContent = "✗ " + e.message + " (Puter 답변 단계는 브라우저에서만 동작)";
   }
   $("askBtn").disabled = false;
+};
+
+// ---- library: list docs, toggle favorite ----
+async function loadLibrary(favOnly) {
+  $("libMsg").textContent = "불러오는 중…";
+  const { docs } = await (await fetch(API + "/docs" + (favOnly ? "?fav=1" : ""))).json();
+  $("libMsg").textContent = `${docs.length}개 문서`;
+  $("libList").innerHTML = docs.length ? docs.map((d) => {
+    const tags = (d.tags || []).map((t) => `<span class="pill">#${esc(t)}</span>`).join(" ");
+    const link = d.source && /^https?:/.test(d.source) ? ` <a href="${d.source}" target="_blank">↗</a>` : "";
+    return `<div class="src" style="margin:8px 0;display:flex;gap:8px;align-items:baseline">
+      <a href="#" class="favtog" data-id="${d.docId}" data-fav="${d.fav}" title="즐겨찾기" style="text-decoration:none">${d.fav ? "⭐" : "☆"}</a>
+      <div><b>${esc(d.title)}</b> <span class="muted">${d.topic || ""} · ${d.chunks}조각</span>${link}<br>${tags}</div>
+    </div>`;
+  }).join("") : "<div class='muted'>문서가 없어요.</div>";
+  document.querySelectorAll("#libList .favtog").forEach((a) => a.onclick = async (e) => {
+    e.preventDefault();
+    const next = a.dataset.fav === "1" ? false : true;
+    await fetch(API + "/fav", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ docId: a.dataset.id, fav: next }) });
+    loadLibrary(favOnly); loadTags();
+  });
+}
+$("libBtn").onclick = () => loadLibrary(false);
+$("libFavBtn").onclick = () => loadLibrary(true);
+
+// ---- duplicate cleanup ----
+$("dupBtn").onclick = async () => {
+  $("dupMsg").textContent = "분석 중…";
+  const { groups } = await (await fetch(API + "/duplicates")).json();
+  $("dupMsg").textContent = `${groups.length}개 그룹`;
+  if (!groups.length) { $("dupList").innerHTML = "<div class='muted'>중복이 없어요. 깔끔하네요 ✨</div>"; return; }
+  $("dupList").innerHTML = groups.map((g, gi) => {
+    const items = g.docs.map((d) => `<li>${esc(d.title)} <span class="muted">${d.chunks}조각 · ${new Date(d.ts).toLocaleDateString()}</span></li>`).join("");
+    return `<div class="card" style="margin:8px 0">
+      <span class="pill">${g.reason === "exact" ? "완전 동일" : "유사 " + g.score}</span>
+      <ol style="margin:6px 0">${items}</ol>
+      <button class="mergeBtn" data-gi="${gi}">첫 항목으로 합치기 (${g.docs.length - 1}개 제거)</button>
+    </div>`;
+  }).join("");
+  document.querySelectorAll("#dupList .mergeBtn").forEach((b) => b.onclick = async () => {
+    const g = groups[b.dataset.gi];
+    b.disabled = true; b.textContent = "합치는 중…";
+    const keepDocId = g.docs[0].docId;
+    const dropDocIds = g.docs.slice(1).map((d) => d.docId);
+    await fetch(API + "/merge", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keepDocId, dropDocIds }) });
+    refreshStats(); loadTags();
+    $("dupBtn").onclick(); // refresh the list
+  });
 };
 </script>
 </body>
