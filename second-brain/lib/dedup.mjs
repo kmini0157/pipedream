@@ -66,17 +66,22 @@ function meta(d) {
 
 // Keep one doc, fold the others into it (union tags, OR favorite), delete them.
 export async function merge(keepDocId, dropDocIds) {
+  if (dropDocIds.includes(keepDocId)) {
+    throw new Error("keepDocId must not be included in dropDocIds");
+  }
   const docs = await docCentroids();
-  const all = [keepDocId, ...dropDocIds];
-  const involved = docs.filter((d) => all.includes(d.docId));
-  const tags = new Set();
-  let fav = 0;
-  for (const d of involved) {
+  const keep = docs.find((d) => d.docId === keepDocId);
+  if (!keep) return { keepDocId, kept: 0, dropped: 0, removedChunks: 0, tags: [], fav: 0 };
+
+  const drops = docs.filter((d) => dropDocIds.includes(d.docId));
+  const tags = new Set(keep.tags || []);
+  let fav = keep.fav ? 1 : 0;
+  for (const d of drops) {
     (d.tags || []).forEach((t) => tags.add(t));
     if (d.fav) fav = 1;
   }
   await setTags(keepDocId, [...tags]);
   if (fav) await setFav(keepDocId, 1);
-  const removed = await deleteDocs(dropDocIds.filter((id) => id !== keepDocId));
-  return { keepDocId, dropped: dropDocIds.length, removedChunks: removed, tags: [...tags], fav };
+  const removedChunks = await deleteDocs(drops.map((d) => d.docId));
+  return { keepDocId, kept: 1, dropped: drops.length, removedChunks, tags: [...tags], fav };
 }

@@ -19,6 +19,10 @@ export async function add(rows) {
   return (await adapter()).add(rows);
 }
 export async function search(queryVec, k = 5, filters = {}) {
+  if (!Array.isArray(queryVec) || !queryVec.length) {
+    throw new Error("query vector must be a non-empty array");
+  }
+  k = Math.max(1, Math.min(1000, Math.floor(k) || 5));
   return (await adapter()).search(queryVec, k, filters);
 }
 export async function stats() {

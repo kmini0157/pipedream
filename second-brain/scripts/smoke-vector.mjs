@@ -31,7 +31,11 @@ for (const q of queries) {
     .sort((a, b) => b.s - a.s).slice(0, 3).map((x) => x.title);
 
   console.log(`q="${q}"\n   native:   ${native.join(", ")}\n   baseline: ${baseline.join(", ")}`);
+  // top-1 must match exactly; the full top-k must be the SAME SET (ANN may
+  // legitimately reorder near-tied neighbours, but must not drop/add docs).
   ok(native[0] === baseline[0], `top hit must match baseline for "${q}"`);
+  ok(JSON.stringify([...native].sort()) === JSON.stringify([...baseline].sort()),
+    `top-${native.length} set must match baseline for "${q}" (native=${native}, baseline=${baseline})`);
 }
 
 console.log("\n2) native + filter combine");

@@ -99,6 +99,10 @@
 <script>
 const API = location.origin;
 const $ = (id) => document.getElementById(id);
+// Escapes for both text and HTML attributes (quotes included to prevent
+// attribute breakout). Use for ALL server-provided strings.
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 async function refreshStats() {
   try { const s = await (await fetch(API + "/stats")).json();
@@ -199,7 +203,7 @@ $("addBtn").onclick = async () => {
 async function loadWatches() {
   const { watches } = await (await fetch(API + "/watches")).json();
   $("watchList").innerHTML = watches.length
-    ? watches.map((w) => `<div class="src">• <b>${w.topic}</b> <span class="muted">${w.type} · ${w.seenCount}개 추적</span> <a href="#" data-id="${w.id}" class="del">삭제</a></div>`).join("")
+    ? watches.map((w) => `<div class="src">• <b>${esc(w.topic)}</b> <span class="muted">${esc(w.type)} · ${esc(w.seenCount)}개 추적</span> <a href="#" data-id="${esc(w.id)}" class="del">삭제</a></div>`).join("")
     : "<div class='muted'>아직 등록된 주제가 없어요.</div>";
   document.querySelectorAll(".del").forEach((a) => a.onclick = async (e) => {
     e.preventDefault();
@@ -231,8 +235,9 @@ $("digestBtn").onclick = async () => {
   $("dMsg").textContent = "불러오는 중…";
   const d = await (await fetch(API + "/digest?hours=24")).json();
   $("dMsg").textContent = `${d.count}건 · ${d.topics}개 주제`;
-  // minimal markdown -> html
-  $("digest").innerHTML = d.markdown
+  // minimal markdown -> html. Escape first so document content can't inject HTML;
+  // the link href is built from already-escaped text (quotes -> &quot;).
+  $("digest").innerHTML = esc(d.markdown)
     .replace(/^# (.*)$/gm, "<h2>$1</h2>")
     .replace(/^## (.*)$/gm, "<h3>$1</h3>")
     .replace(/\[원문\]\(([^)]+)\)/g, '<a href="$1" target="_blank">원문</a>')
@@ -245,7 +250,7 @@ let selectedTopic = null;
 async function loadTopics() {
   const { topics } = await (await fetch(API + "/topics")).json();
   const chip = (label, key, count) =>
-    `<a href="#" data-topic="${key ?? ""}" class="chip" style="text-decoration:none;border:1px solid #8886;border-radius:999px;padding:3px 10px;font-size:13px;${selectedTopic === key ? "background:#4f46e5;color:#fff" : ""}">${label}${count != null ? ` <span class="muted">${count}</span>` : ""}</a>`;
+    `<a href="#" data-topic="${esc(key ?? "")}" class="chip" style="text-decoration:none;border:1px solid #8886;border-radius:999px;padding:3px 10px;font-size:13px;${selectedTopic === key ? "background:#4f46e5;color:#fff" : ""}">${esc(label)}${count != null ? ` <span class="muted">${esc(count)}</span>` : ""}</a>`;
   $("topicChips").innerHTML =
     chip("전체", null) + topics.map((t) => chip(t.topic, t.topic, t.docs)).join("");
   document.querySelectorAll("#topicChips .chip").forEach((a) => a.onclick = (e) => {
@@ -261,7 +266,7 @@ async function loadTags() {
   const { tags } = await (await fetch(API + "/tags")).json();
   if (!tags.length) { $("tagChips").innerHTML = ""; return; }
   const chip = (label, key, count) =>
-    `<a href="#" data-tag="${key ?? ""}" class="tchip" style="text-decoration:none;border:1px solid #8886;border-radius:999px;padding:3px 10px;font-size:13px;${selectedTag === key ? "background:#0891b2;color:#fff" : ""}">#${label}${count != null ? ` <span class="muted">${count}</span>` : ""}</a>`;
+    `<a href="#" data-tag="${esc(key ?? "")}" class="tchip" style="text-decoration:none;border:1px solid #8886;border-radius:999px;padding:3px 10px;font-size:13px;${selectedTag === key ? "background:#0891b2;color:#fff" : ""}">#${esc(label)}${count != null ? ` <span class="muted">${esc(count)}</span>` : ""}</a>`;
   $("tagChips").innerHTML =
     `<span class="muted" style="align-self:center">태그:</span>` +
     chip("전체", null) + tags.map((t) => chip(t.tag, t.tag, t.docs)).join("");
@@ -273,7 +278,6 @@ async function loadTags() {
 }
 loadTags();
 
-const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 function highlight(text, query) {
   const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])].filter((t) => t.length > 1);
   let out = esc(text);
@@ -310,13 +314,13 @@ $("askBtn").onclick = async () => {
       body: JSON.stringify(body),
     })).json();
 
-    const scope = [selectedTopic && `주제: ${selectedTopic}`, selectedTag && `#${selectedTag}`, $("favOnly").checked && "⭐", days && `최근 ${days}일`].filter(Boolean).join(" · ");
+    const scope = [selectedTopic && `주제: ${esc(selectedTopic)}`, selectedTag && `#${esc(selectedTag)}`, $("favOnly").checked && "⭐", days && `최근 ${days}일`].filter(Boolean).join(" · ");
     if (!hits.length) { $("askMsg").textContent = `결과 없음${scope ? " (" + scope + ")" : ""}`; $("askBtn").disabled = false; return; }
 
     // Retrieved chunks with highlighted snippets.
     $("hits").innerHTML = `<div class='muted' style='margin-top:12px'>참고한 조각${scope ? " · " + scope : ""}:</div>` +
       hits.map((h, i) => {
-        const link = h.source && /^https?:/.test(h.source) ? ` <a href="${h.source}" target="_blank">↗</a>` : "";
+        const link = h.source && /^https?:/.test(h.source) ? ` <a href="${esc(h.source)}" target="_blank">↗</a>` : "";
         return `<div class="src" style="margin:8px 0">
           [${i + 1}] <b>${esc(h.title)}</b> <span class="muted">${h.topic || ""} · ${(h.score).toFixed(2)}</span>${link}
           <div style="font-size:13px;opacity:.9;margin-top:2px">${highlight(snippet(h.text, query), query)}</div></div>`;
@@ -342,10 +346,10 @@ async function loadLibrary(favOnly) {
   $("libMsg").textContent = `${docs.length}개 문서`;
   $("libList").innerHTML = docs.length ? docs.map((d) => {
     const tags = (d.tags || []).map((t) => `<span class="pill">#${esc(t)}</span>`).join(" ");
-    const link = d.source && /^https?:/.test(d.source) ? ` <a href="${d.source}" target="_blank">↗</a>` : "";
+    const link = d.source && /^https?:/.test(d.source) ? ` <a href="${esc(d.source)}" target="_blank">↗</a>` : "";
     return `<div class="src" style="margin:8px 0;display:flex;gap:8px;align-items:baseline">
-      <a href="#" class="favtog" data-id="${d.docId}" data-fav="${d.fav}" title="즐겨찾기" style="text-decoration:none">${d.fav ? "⭐" : "☆"}</a>
-      <div><b>${esc(d.title)}</b> <span class="muted">${d.topic || ""} · ${d.chunks}조각</span>${link}<br>${tags}</div>
+      <a href="#" class="favtog" data-id="${esc(d.docId)}" data-fav="${esc(d.fav)}" title="즐겨찾기" style="text-decoration:none">${d.fav ? "⭐" : "☆"}</a>
+      <div><b>${esc(d.title)}</b> <span class="muted">${esc(d.topic || "")} · ${esc(d.chunks)}조각</span>${link}<br>${tags}</div>
     </div>`;
   }).join("") : "<div class='muted'>문서가 없어요.</div>";
   document.querySelectorAll("#libList .favtog").forEach((a) => a.onclick = async (e) => {

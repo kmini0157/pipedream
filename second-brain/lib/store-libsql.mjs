@@ -89,15 +89,39 @@ function buildWhere(f = {}, table = "chunks") {
 
 const strip = ({ vec, emb, dist, ...rest }) => rest;
 
+function safeParse(s, fallback) {
+  try { return JSON.parse(s); } catch { return fallback; }
+}
+
+// Exhaustive JS-cosine search (filter in SQL, score in JS). Used as the
+// fallback and to backfill when the native ANN path is pruned below k.
+async function jsSearch(queryVec, k, filters) {
+  const { clause, args } = buildWhere(filters);
+  const { rows } = await client().execute({ sql: `SELECT * FROM chunks${clause}`, args });
+  return rows
+    .map((r) => {
+      const v = safeParse(r.vec, null);
+      return v ? { ...r, score: cosine(queryVec, v) } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, k)
+    .map(strip);
+}
+
 export async function search(queryVec, k = 5, filters = {}) {
   await ready();
+  if (!Array.isArray(queryVec) || queryVec.length !== DIM) {
+    throw new Error(`query vector must be a ${DIM}-dim array (got ${Array.isArray(queryVec) ? queryVec.length : typeof queryVec})`);
+  }
+  k = Math.max(1, Math.min(1000, Math.floor(k) || 5));
   const c = client();
   const hasFilters = Object.keys(filters).length > 0;
 
   if (_native) {
     try {
       // Over-fetch candidates when filtering, since the WHERE prunes ANN hits.
-      const topk = hasFilters ? Math.max(k * 8, 40) : k;
+      const topk = hasFilters ? Math.max(k * 16, 64) : k;
       const { clause, args } = buildWhere(filters);
       const sql =
         `SELECT chunks.*, vector_distance_cos(chunks.emb, vector32(?)) AS dist
@@ -108,20 +132,18 @@ export async function search(queryVec, k = 5, filters = {}) {
         sql,
         args: [vjson(queryVec), vjson(queryVec), topk, ...args, k],
       });
-      return rows.map((r) => ({ ...strip(r), score: 1 - Number(r.dist) }));
+      // If filters pruned the ANN candidates below k, backfill with an
+      // exhaustive scan so we still return up to k results (parity w/ ndjson).
+      if (!(hasFilters && rows.length < k)) {
+        return rows.map((r) => ({ ...strip(r), score: 1 - Number(r.dist) }));
+      }
     } catch (e) {
-      _native = false; // degrade once, then use JS path
+      console.warn("[second-brain] native vector path failed, using JS cosine:", e.message);
+      _native = false; // degrade for subsequent calls too
     }
   }
 
-  // Fallback: filter in SQL, score in JS.
-  const { clause, args } = buildWhere(filters);
-  const { rows } = await c.execute({ sql: `SELECT * FROM chunks${clause}`, args });
-  return rows
-    .map((r) => ({ ...r, score: cosine(queryVec, JSON.parse(r.vec)) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, k)
-    .map(strip);
+  return jsSearch(queryVec, k, filters);
 }
 
 export async function stats() {
@@ -201,7 +223,7 @@ export async function listDocs(filters = {}) {
   });
   return rows.map((r) => ({
     docId: r.docId, title: r.title, source: r.source, topic: r.topic, kind: r.kind,
-    tags: JSON.parse(r.tags || "[]"), fav: Number(r.fav || 0),
+    tags: safeParse(r.tags, []), fav: Number(r.fav || 0),
     ts: r.ts, chunks: Number(r.chunks),
   }));
 }
@@ -213,11 +235,12 @@ export async function docCentroids() {
   );
   const byDoc = new Map();
   for (const r of rows) {
-    const v = JSON.parse(r.vec);
+    const v = safeParse(r.vec, null);
+    if (!v) continue; // skip rows with corrupted vectors instead of crashing
     if (!byDoc.has(r.docId)) {
       byDoc.set(r.docId, {
         docId: r.docId, title: r.title, ts: r.ts, contentHash: r.contentHash || null,
-        tags: JSON.parse(r.tags || "[]"), fav: Number(r.fav || 0), chunks: 0,
+        tags: safeParse(r.tags, []), fav: Number(r.fav || 0), chunks: 0,
         sum: new Array(v.length).fill(0),
       });
     }

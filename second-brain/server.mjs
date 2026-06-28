@@ -94,7 +94,10 @@ async function handleSearch(req, res) {
 async function handleTag(req, res) {
   const { docId, tags } = await readBody(req);
   if (!docId || !Array.isArray(tags)) return json(res, 400, { error: "docId and tags[] required" });
-  const n = await setTags(docId, tags.map((t) => String(t).trim()).filter(Boolean));
+  if (tags.length > 100) return json(res, 400, { error: "too many tags (max 100)" });
+  const clean = tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 100);
+  const n = await setTags(docId, clean);
+  if (n === 0) return json(res, 404, { error: "docId not found" });
   json(res, 200, { ok: true, updated: n });
 }
 
@@ -102,6 +105,7 @@ async function handleFav(req, res) {
   const { docId, fav } = await readBody(req);
   if (!docId) return json(res, 400, { error: "docId required" });
   const n = await setFav(docId, !!fav);
+  if (n === 0) return json(res, 404, { error: "docId not found" });
   json(res, 200, { ok: true, updated: n, fav: !!fav });
 }
 
@@ -122,7 +126,10 @@ async function handleDuplicates(req, res) {
 async function handleMerge(req, res) {
   const { keepDocId, dropDocIds } = await readBody(req);
   if (!keepDocId || !Array.isArray(dropDocIds)) return json(res, 400, { error: "keepDocId and dropDocIds[] required" });
-  json(res, 200, { ok: true, ...(await merge(keepDocId, dropDocIds)) });
+  if (dropDocIds.includes(keepDocId)) return json(res, 400, { error: "keepDocId must not be in dropDocIds" });
+  const result = await merge(keepDocId, dropDocIds);
+  if (result.kept === 0) return json(res, 404, { error: "keepDocId not found" });
+  json(res, 200, { ok: true, ...result });
 }
 
 async function handleWatches(req, res) {
