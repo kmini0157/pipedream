@@ -9,6 +9,9 @@ import { buildDigest } from "./lib/digest.mjs";
 import { storeDoc, storeUrl } from "./lib/pipeline.mjs";
 import { extractText } from "./lib/extract.mjs";
 import { findDuplicates, merge } from "./lib/dedup.mjs";
+import { rerank, reranking } from "./lib/rerank.mjs";
+import { webSearch, searchEnabled } from "./lib/websearch.mjs";
+import { chat, llmEnabled } from "./lib/llm.mjs";
 
 const PORT = process.env.PORT || 8787;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -103,19 +106,77 @@ async function handleClip(req, res) {
   }
 }
 
-async function handleSearch(req, res) {
-  const { query, k, topic, since, until, kind, tag, fav } = await readBody(req);
-  if (!query) return json(res, 400, { error: "query required" });
+function filtersFrom({ topic, kind, tag, fav, since, until }) {
+  const f = {};
+  if (topic) f.topic = topic;
+  if (kind) f.kind = kind;
+  if (tag) f.tag = tag;
+  if (fav) f.fav = 1;
+  if (since) f.since = since;
+  if (until) f.until = until;
+  return f;
+}
+
+// Embed -> (over-fetch + rerank when enabled) -> top-k hits.
+async function retrieve(query, k, filters) {
   const qv = await embedOne(query);
-  const filters = {};
-  if (topic) filters.topic = topic;
-  if (kind) filters.kind = kind;
-  if (tag) filters.tag = tag;
-  if (fav) filters.fav = 1;
-  if (since) filters.since = since;
-  if (until) filters.until = until;
-  const hits = await search(qv, k || 5, filters);
-  json(res, 200, { query, filters, hits });
+  const fetchN = reranking ? Math.max(k * 4, 20) : k;
+  const hits = await search(qv, fetchN, filters);
+  return reranking ? await rerank(query, hits, k) : hits;
+}
+
+async function handleSearch(req, res) {
+  const body = await readBody(req);
+  if (!body.query) return json(res, 400, { error: "query required" });
+  const filters = filtersFrom(body);
+  const hits = await retrieve(body.query, body.k || 5, filters);
+  json(res, 200, { query: body.query, filters, reranked: reranking, hits });
+}
+
+// Live web search; optionally ingest the results into the brain.
+async function handleResearch(req, res) {
+  if (!searchEnabled) return json(res, 400, { error: "SEARCH_PROVIDER not configured" });
+  const { query, max, ingest } = await readBody(req);
+  if (!query) return json(res, 400, { error: "query required" });
+  const results = await webSearch(query, { max: max || 5 });
+  const ingested = [];
+  if (ingest) {
+    for (const r of results) {
+      try {
+        ingested.push({ url: r.url, ...(await storeUrl(r.url, { topic: "research" })) });
+      } catch (e) {
+        ingested.push({ url: r.url, error: String(e.message || e) });
+      }
+    }
+  }
+  json(res, 200, { query, results, ingested });
+}
+
+// RAG answer: retrieve (with rerank if on) then synthesize a cited answer.
+async function handleAsk(req, res) {
+  const body = await readBody(req);
+  if (!body.query) return json(res, 400, { error: "query required" });
+  const hits = await retrieve(body.query, body.k || 6, filtersFrom(body));
+  const sources = hits.map((h, i) => ({
+    n: i + 1, title: h.title, source: h.source, score: h.rerankScore ?? h.score,
+  }));
+  if (!hits.length) return json(res, 200, { query: body.query, answer: null, note: "저장된 근거 없음", sources });
+  if (!llmEnabled) {
+    return json(res, 200, { query: body.query, answer: null, note: "LLM_BASE_URL 미설정 — 출처만 반환", sources, hits });
+  }
+  const context = hits.map((h, i) => `[${i + 1}] (${h.title})\n${h.text}`).join("\n\n");
+  try {
+    const answer = await chat(
+      [
+        { role: "system", content: "아래 발췌만 근거로 한국어로 답하고, 문장 끝에 [번호] 출처를 단다. 근거가 없으면 모른다고 한다." },
+        { role: "user", content: `질문: ${body.query}\n\n발췌:\n${context}` },
+      ],
+      { max_tokens: 600 },
+    );
+    json(res, 200, { query: body.query, answer, sources });
+  } catch (e) {
+    json(res, 200, { query: body.query, answer: null, error: String(e.message || e), sources });
+  }
 }
 
 // Document-level metadata + dedup endpoints.
@@ -216,6 +277,8 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && path === "/ingest-file") return await handleIngestFile(req, res);
     if (req.method === "GET" && path === "/clip") return await handleClip(req, res);
     if (req.method === "POST" && path === "/search") return await handleSearch(req, res);
+    if (req.method === "POST" && path === "/research") return await handleResearch(req, res);
+    if (req.method === "POST" && path === "/ask") return await handleAsk(req, res);
     if (req.method === "GET" && path === "/stats") return json(res, 200, { ...(await stats()), backend });
     if (req.method === "GET" && path === "/telemetry") return json(res, 200, await telemetry());
     if (req.method === "GET" && path === "/topics") return json(res, 200, { topics: await topics() });

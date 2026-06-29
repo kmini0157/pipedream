@@ -82,6 +82,8 @@ EMBED_PROVIDER=hashing npm run smoke   # 네트워크 없이 전 과정 검증
 | 웹 URL | UI URL칸 / `{url}` → Jina 추출 | — |
 | 파일 | UI 📎 또는 `POST /ingest-file?name=` (`.md/.txt/.html/.json/.csv`) | — |
 | PDF | UI 📎 — 브라우저 **pdf.js**로 텍스트 추출 후 저장 (스캔본은 OCR 필요) | — |
+| YouTube | URL칸에 영상 주소 → **자막 전사** 후 저장 (키 없음) | — |
+| 웹 검색 | 🌐 웹 리서치 버튼 / `POST /research` → 결과 자동 저장 | 🎁 (SEARCH_PROVIDER) |
 | 원클릭 클립 | 🔖 북마클릿을 북마크바로 드래그 → 아무 페이지에서 선택분/URL 저장 | — |
 | 음성 메모 | UI 🎙️ — 브라우저 Web Speech API 받아쓰기(ko-KR) | — |
 | RSS/Atom | 관심 주제 등록 → 매일 자동 수집 | — |
@@ -149,6 +151,21 @@ SUMMARY=llm LLM_BASE_URL=https://api.groq.com/openai/v1 \
   문서를 한 클러스터로 묶어 보여주고, 한 번에 병합합니다. 병합 시 태그는 합집합,
   즐겨찾기는 OR로 보존되고 나머지 문서는 삭제됩니다.
 
+## 외부 API 연동 (전부 선택적·플러그러블·미설정 시 graceful)
+
+키 없는 기본값으로도 완전히 돌지만, 환경변수만 올리면 품질·범위가 크게 확장됩니다.
+모든 통합은 base URL 오버라이드가 있어 로컬 mock으로 검증됩니다(`scripts/mock-apis.mjs`).
+
+| 연동 | 켜는 법 | 무엇이 좋아지나 |
+|------|---------|----------------|
+| **Jina 임베딩 v3** | `EMBED_PROVIDER=jina` + `JINA_API_KEY` | 다국어(한국어) 의미검색 품질↑ (384d로 요청해 스키마 호환) |
+| **Jina 리랭커** | `RERANK=jina` + `JINA_API_KEY` | top-20 후보를 크로스인코더로 재정렬 → 정확도↑ |
+| **웹 검색** | `SEARCH_PROVIDER=tavily\|brave\|jina` | `/research`로 라이브 검색·자동 저장 |
+| **YouTube 자막** | (키 없음) | URL만 붙이면 전사 후 저장 |
+| **서버측 LLM** | `LLM_BASE_URL`(+키/모델) | `/ask` RAG 답변 + 다이제스트 LLM 요약 (Groq/OpenRouter 무료) |
+
+검증: `npm run mock:apis` (백그라운드) 후 `npm run smoke:apis`.
+
 ## 검색 UX
 
 물어보기 화면에서 **주제 칩**(`/topics` facet)과 **기간**(전체/24시간/7일/30일)으로
@@ -181,7 +198,9 @@ AUTH_TOKEN=$(openssl rand -hex 24) STORE=libsql LIBSQL_URL=file:data/store.db np
 | POST | `/ingest` | `{url}` 또는 `{text, title?, topic?}` | 메모/URL 저장 |
 | POST | `/ingest-file?name=` | 원시 파일 바이트 | `.md/.txt/.html/.json/.csv` 추출→저장 |
 | GET | `/clip?text=&title=` 또는 `?url=` | — | 북마클릿 원클릭 클립 |
-| POST | `/search` | `{query, k?, topic?, tag?, fav?, since?, until?, kind?}` | 의미 검색 + 주제/태그/즐겨찾기/기간 필터 |
+| POST | `/search` | `{query, k?, topic?, tag?, fav?, since?, until?, kind?}` | 의미 검색 + 필터 (+ 리랭크 켜져 있으면 자동 적용) |
+| POST | `/ask` | `{query, k?, ...filters}` | RAG 답변(서버측 LLM) + 인용 출처. LLM 미설정 시 출처만 |
+| POST | `/research` | `{query, max?, ingest?}` | 라이브 웹 검색, `ingest:true`면 결과를 저장 |
 | GET | `/topics` | — | 주제 facet (이름 + 문서 수) |
 | GET | `/tags` | — | 태그 facet (이름 + 문서 수) |
 | GET | `/docs` | `?tag=&topic=&fav=1` | 문서 목록 (즐겨찾기/태그/주제 필터) |
@@ -206,6 +225,10 @@ second-brain/
   lib/store-ndjson.mjs     # NDJSON 어댑터 (의존성 0)
   lib/store-libsql.mjs     # libSQL/Turso 어댑터 (네이티브 벡터 인덱스 + 폴백)
   lib/dedup.mjs            # 중복/유사 문서 클러스터링 + 병합
+  lib/rerank.mjs           # 선택적 리랭킹 (Jina)
+  lib/websearch.mjs        # 웹 검색 (tavily/brave/s.jina)
+  lib/youtube.mjs          # 키리스 YouTube 자막 전사
+  lib/llm.mjs              # OpenAI 호환 서버측 LLM
   lib/ingest.mjs           # Jina 추출 + 청킹
   lib/pipeline.mjs         # 공용 ingest 파이프라인 (모든 입력 채널 공유)
   lib/extract.mjs          # 파일 텍스트 추출 (md/html/json/csv)
@@ -223,6 +246,8 @@ second-brain/
   scripts/smoke-dedup.mjs  # 오프라인 E2E (중복 탐지·병합)
   scripts/smoke-vector.mjs # libSQL 네이티브 벡터 패리티 (STORE=libsql)
   scripts/smoke-telemetry.mjs # libSQL 백필 telemetry (STORE=libsql)
+  scripts/mock-apis.mjs    # 외부 API 로컬 mock
+  scripts/smoke-apis.mjs   # 외부 API 연동 검증 (mock 대상)
   scripts/collect.mjs      # cron: 수집
   scripts/digest.mjs       # cron: 다이제스트 + 전송
   examples/github-actions-daily.yml

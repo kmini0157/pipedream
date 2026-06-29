@@ -3,10 +3,11 @@
 // OpenAI-compatible endpoint (Groq/OpenRouter free tiers, local, etc.) for
 // fluent prose. The LLM path falls back to extractive on any error.
 import { since } from "./store.mjs";
+import { chat, llmEnabled } from "./llm.mjs";
 
 // Returns an async (text) => summary. Picks LLM or extractive once per build.
 function makeSummarizer() {
-  const useLLM = (process.env.SUMMARY || "extractive") === "llm" && process.env.LLM_BASE_URL;
+  const useLLM = (process.env.SUMMARY || "extractive") === "llm" && llmEnabled;
   if (!useLLM) return async (text) => extractive(text);
   return async (text) => {
     try {
@@ -18,28 +19,13 @@ function makeSummarizer() {
 }
 
 async function summarizeLLM(text) {
-  const base = process.env.LLM_BASE_URL.replace(/\/$/, "");
-  const res = await fetch(`${base}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(process.env.LLM_API_KEY ? { Authorization: `Bearer ${process.env.LLM_API_KEY}` } : {}),
-    },
-    body: JSON.stringify({
-      model: process.env.LLM_MODEL || "gpt-4o-mini",
-      temperature: 0.2,
-      max_tokens: 160,
-      messages: [
-        { role: "system", content: "너는 한국어 뉴스 요약가다. 핵심만 1-2문장으로, 군더더기 없이 요약한다." },
-        { role: "user", content: `다음 글을 1-2문장으로 요약해줘:\n\n${text.slice(0, 4000)}` },
-      ],
-    }),
-  });
-  if (!res.ok) throw new Error("llm " + res.status);
-  const data = await res.json();
-  const out = data?.choices?.[0]?.message?.content?.trim();
-  if (!out) throw new Error("empty llm response");
-  return out;
+  return chat(
+    [
+      { role: "system", content: "너는 한국어 뉴스 요약가다. 핵심만 1-2문장으로, 군더더기 없이 요약한다." },
+      { role: "user", content: `다음 글을 1-2문장으로 요약해줘:\n\n${text.slice(0, 4000)}` },
+    ],
+    { max_tokens: 160 },
+  );
 }
 
 function sentences(text) {

@@ -3,6 +3,7 @@
 import { embed } from "./embed.mjs";
 import { add } from "./store.mjs";
 import { chunk, fetchUrlText } from "./ingest.mjs";
+import { isYoutube, fetchYoutubeTranscript } from "./youtube.mjs";
 
 let _seq = 0;
 function newDocId() {
@@ -42,8 +43,13 @@ export async function storeDoc({ text, title, source, topic, kind = "note", tags
   return { docId, title: rows[0].title, chunks: rows.length };
 }
 
-// Fetch a URL via Jina (keyless) then store it.
+// Fetch a URL then store it. YouTube links use the transcript fetcher; every
+// other URL goes through the Jina reader.
 export async function storeUrl(url, { title, topic, tags } = {}) {
+  if (isYoutube(url)) {
+    const yt = await fetchYoutubeTranscript(url);
+    return storeDoc({ text: yt.text, title: title || yt.title, source: url, topic, tags, kind: "youtube" });
+  }
   const fetched = await fetchUrlText(url);
   return storeDoc({ text: fetched.text, title: title || fetched.title, source: url, topic, tags, kind: "web" });
 }

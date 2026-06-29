@@ -79,6 +79,7 @@
       <option value="30">최근 30일</option>
     </select>
     <button id="askBtn">검색 + 답변</button>
+    <button id="researchBtn" style="background:#0d9488" title="웹에서 찾아 두 번째 뇌에 저장 (SEARCH_PROVIDER 필요)">🌐 웹 리서치</button>
     <span id="askMsg" class="muted"></span>
   </div>
   <label class="muted" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="favOnly" style="width:auto" /> ⭐ 즐겨찾기만</label>
@@ -402,6 +403,29 @@ $("askBtn").onclick = async () => {
     $("askMsg").textContent = "✗ " + e.message + " (Puter 답변 단계는 브라우저에서만 동작)";
   }
   $("askBtn").disabled = false;
+};
+
+// ---- web research: search the live web and ingest the results ----
+$("researchBtn").onclick = async () => {
+  const query = $("q").value.trim();
+  if (!query) return;
+  $("researchBtn").disabled = true; $("askMsg").textContent = "웹 검색 중…";
+  $("answer").innerHTML = ""; $("hits").innerHTML = "";
+  try {
+    const r = await (await fetch(API + "/research", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, max: 5, ingest: true }),
+    })).json();
+    if (r.error) throw new Error(r.error);
+    const okCount = (r.ingested || []).filter((x) => !x.error).length;
+    $("askMsg").textContent = `웹 ${r.results.length}건 → ${okCount}건 저장됨`;
+    $("hits").innerHTML = "<div class='muted' style='margin-top:12px'>웹 결과:</div>" +
+      r.results.map((x) => `<div class="src" style="margin:6px 0"><b>${esc(x.title)}</b> <a href="${esc(x.url)}" target="_blank">↗</a><br><span style="font-size:13px;opacity:.85">${esc(x.snippet)}</span></div>`).join("");
+    refreshStats(); loadTopics();
+  } catch (e) {
+    $("askMsg").textContent = "✗ " + e.message + " (서버에 SEARCH_PROVIDER 설정 필요)";
+  }
+  $("researchBtn").disabled = false;
 };
 
 // ---- library: list docs, toggle favorite ----
