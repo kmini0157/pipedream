@@ -19,9 +19,13 @@
 
 ```bash
 cd second-brain
-npm install            # 의존성은 transformers.js 하나뿐
+npm run setup          # install + sharp 스텁 패치 (로컬 임베딩용)
 npm start              # http://localhost:8787 접속
 ```
+
+> `npm run setup`은 네이티브 빌드 없이 설치하고 transformers.js가 쓰지 않는
+> `sharp`를 무해한 스텁으로 패치합니다. `EMBED_PROVIDER=hashing`만 쓸 거면
+> 일반 `npm install`로도 충분합니다.
 
 브라우저에서 URL이나 메모를 추가하고, 질문하면 검색된 출처를 근거로 Puter가
 한국어로 답합니다.
@@ -152,6 +156,24 @@ SUMMARY=llm LLM_BASE_URL=https://api.groq.com/openai/v1 \
 서버 `/search`의 `topic`/`since`/`until`/`kind` 파라미터로 전달되어, libSQL 백엔드에선
 SQL `WHERE`로 내려갑니다.
 
+## 배포
+
+상시 실행 Node 서버라 **장수 컨테이너 호스트**(Fly.io / Render / Docker / VPS)에
+배포합니다. 자세한 단계는 [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
+- **인증**: `AUTH_TOKEN`을 설정하면 `/health`와 정적 셸을 제외한 모든 라우트가
+  토큰을 요구합니다(헤더·`?token=`·`sb_token` 쿠키). UI는 처음 접속 시 토큰을
+  물어 쿠키에 저장해, 이후 요청·북마클릿이 자동 인증됩니다. **공개 URL이면 필수.**
+- **헬스체크**: `GET /health` → `{ok,backend}` (인증 없이 열림).
+- **컨테이너**: `docker build -t second-brain . && docker run -p 8787:8787 -e AUTH_TOKEN=... second-brain`
+- **영속성**: 컨테이너 디스크는 휘발성 → `STORE=libsql` + Turso 권장.
+- **종료**: SIGTERM/SIGINT에 graceful shutdown.
+
+```bash
+# 로컬에서 프로덕션 모드로 띄워보기
+AUTH_TOKEN=$(openssl rand -hex 24) STORE=libsql LIBSQL_URL=file:data/store.db npm start
+```
+
 ## API
 
 | 메서드 | 경로 | 바디 | 설명 |
@@ -168,6 +190,7 @@ SQL `WHERE`로 내려갑니다.
 | GET | `/duplicates` | `?threshold=0.92` | 중복/유사 문서 클러스터 탐지 |
 | POST | `/merge` | `{keepDocId, dropDocIds[]}` | 클러스터 병합 (태그 합집합) |
 | GET | `/telemetry` | — | 검색 경로 카운터 (native/backfill/jsFallback) |
+| GET | `/health` | — | 헬스체크 `{ok,backend}` (인증 없이 열림) |
 | GET | `/stats` | — | 저장된 docs/chunks 수 |
 | GET/POST/DELETE | `/watches` | `{topic,url}` / `?id=` | 관심 주제 관리 |
 | POST | `/collect` | — | 모든 주제 폴링 후 새 글 ingest |
@@ -203,6 +226,10 @@ second-brain/
   scripts/collect.mjs      # cron: 수집
   scripts/digest.mjs       # cron: 다이제스트 + 전송
   examples/github-actions-daily.yml
+  Dockerfile / .dockerignore        # 컨테이너 이미지
+  fly.toml / render.yaml            # 배포 타깃
+  scripts/patch-sharp.mjs           # transformers.js용 sharp 스텁 패치
+  docs/DEPLOY.md                    # 배포 가이드
 ```
 
 검증:

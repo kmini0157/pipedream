@@ -11,7 +11,33 @@ import { extractText } from "./lib/extract.mjs";
 import { findDuplicates, merge } from "./lib/dedup.mjs";
 
 const PORT = process.env.PORT || 8787;
+const HOST = process.env.HOST || "0.0.0.0";
+const AUTH_TOKEN = process.env.AUTH_TOKEN || ""; // empty = open (localhost dev)
 const PUBLIC = new URL("./public/", import.meta.url).pathname;
+
+// Auth: when AUTH_TOKEN is set, every route except /health and the static
+// shell requires the token via Authorization: Bearer, ?token=, or the
+// same-origin sb_token cookie (so the UI and bookmarklet work after login).
+function authed(req) {
+  if (!AUTH_TOKEN) return true;
+  const auth = req.headers["authorization"] || "";
+  if (auth === `Bearer ${AUTH_TOKEN}`) return true;
+  const url = new URL(req.url, "http://x");
+  if (url.searchParams.get("token") === AUTH_TOKEN) return true;
+  const cookie = req.headers["cookie"] || "";
+  const m = cookie.match(/(?:^|;\s*)sb_token=([^;]+)/);
+  if (m && decodeURIComponent(m[1]) === AUTH_TOKEN) return true;
+  return false;
+}
+
+// Open paths even when auth is on: health check + the static shell (which
+// prompts for the token client-side and sets the cookie).
+function isOpenPath(req) {
+  const path = req.url.split("?")[0];
+  if (path === "/health") return true;
+  if (req.method === "GET" && (path === "/" || path === "/index.html")) return true;
+  return false;
+}
 
 function json(res, code, body) {
   const data = JSON.stringify(body);
@@ -32,12 +58,14 @@ function readText(req) {
   });
 }
 
+class BadRequest extends Error {}
+
 async function readBody(req) {
   const raw = await readText(req);
   try {
     return raw ? JSON.parse(raw) : {};
-  } catch (e) {
-    throw e;
+  } catch {
+    throw new BadRequest("invalid JSON body");
   }
 }
 
@@ -176,29 +204,46 @@ async function serveStatic(req, res) {
 
 const server = createServer(async (req, res) => {
   try {
+    const path = (req.url || "/").split("?")[0]; // match on path; tolerate ?token= etc.
     if (req.method === "OPTIONS") return json(res, 204, {});
-    if (req.method === "POST" && req.url === "/ingest") return handleIngest(req, res);
-    if (req.method === "POST" && req.url.startsWith("/ingest-file")) return handleIngestFile(req, res);
-    if (req.method === "GET" && req.url.startsWith("/clip")) return handleClip(req, res);
-    if (req.method === "POST" && req.url === "/search") return handleSearch(req, res);
-    if (req.method === "GET" && req.url === "/stats") return json(res, 200, { ...(await stats()), backend });
-    if (req.method === "GET" && req.url === "/telemetry") return json(res, 200, await telemetry());
-    if (req.method === "GET" && req.url === "/topics") return json(res, 200, { topics: await topics() });
-    if (req.method === "GET" && req.url === "/tags") return json(res, 200, { tags: await tagFacet() });
-    if (req.method === "POST" && req.url === "/tag") return handleTag(req, res);
-    if (req.method === "POST" && req.url === "/fav") return handleFav(req, res);
-    if (req.method === "GET" && req.url.startsWith("/docs")) return handleDocs(req, res);
-    if (req.method === "GET" && req.url.startsWith("/duplicates")) return handleDuplicates(req, res);
-    if (req.method === "POST" && req.url === "/merge") return handleMerge(req, res);
-    if (req.url.startsWith("/watches")) return handleWatches(req, res);
-    if (req.method === "POST" && req.url === "/collect") return handleCollect(req, res);
-    if (req.method === "GET" && req.url.startsWith("/digest")) return handleDigest(req, res);
-    return serveStatic(req, res);
+    if (req.method === "GET" && path === "/health") {
+      return json(res, 200, { ok: true, backend });
+    }
+    if (!isOpenPath(req) && !authed(req)) {
+      return json(res, 401, { error: "unauthorized" });
+    }
+    if (req.method === "POST" && path === "/ingest") return await handleIngest(req, res);
+    if (req.method === "POST" && path === "/ingest-file") return await handleIngestFile(req, res);
+    if (req.method === "GET" && path === "/clip") return await handleClip(req, res);
+    if (req.method === "POST" && path === "/search") return await handleSearch(req, res);
+    if (req.method === "GET" && path === "/stats") return json(res, 200, { ...(await stats()), backend });
+    if (req.method === "GET" && path === "/telemetry") return json(res, 200, await telemetry());
+    if (req.method === "GET" && path === "/topics") return json(res, 200, { topics: await topics() });
+    if (req.method === "GET" && path === "/tags") return json(res, 200, { tags: await tagFacet() });
+    if (req.method === "POST" && path === "/tag") return await handleTag(req, res);
+    if (req.method === "POST" && path === "/fav") return await handleFav(req, res);
+    if (req.method === "GET" && path === "/docs") return await handleDocs(req, res);
+    if (req.method === "GET" && path === "/duplicates") return await handleDuplicates(req, res);
+    if (req.method === "POST" && path === "/merge") return await handleMerge(req, res);
+    if (path === "/watches") return await handleWatches(req, res);
+    if (req.method === "POST" && path === "/collect") return await handleCollect(req, res);
+    if (req.method === "GET" && path === "/digest") return await handleDigest(req, res);
+    return await serveStatic(req, res);
   } catch (e) {
+    if (e instanceof BadRequest) return json(res, 400, { error: e.message });
     json(res, 500, { error: String(e.message || e) });
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`🧠 second-brain on http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`🧠 second-brain on http://${HOST}:${PORT}  (backend=${backend}, auth=${AUTH_TOKEN ? "on" : "off"})`);
 });
+
+// Graceful shutdown so platforms (Fly/Render/Docker) can stop us cleanly.
+for (const sig of ["SIGTERM", "SIGINT"]) {
+  process.on(sig, () => {
+    console.log(`\n${sig} received, shutting down…`);
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 5000).unref();
+  });
+}

@@ -109,9 +109,25 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// Auth gate: if the server is token-protected, prompt once and store the token
+// in a same-origin cookie. Every fetch and the bookmarklet navigation then
+// carry it automatically (SameSite=Lax). No-op when the server is open.
+async function ensureAuth() {
+  try {
+    const r = await fetch(API + "/stats");
+    if (r.status !== 401) return true;
+  } catch { return true; }
+  const t = prompt("🔒 이 두 번째 뇌는 토큰으로 보호돼 있습니다.\nAUTH_TOKEN을 입력하세요:");
+  if (!t) { $("stats").textContent = "🔒 잠김"; return false; }
+  document.cookie = `sb_token=${encodeURIComponent(t.trim())}; path=/; max-age=31536000; SameSite=Lax`;
+  location.reload();
+  return false;
+}
+ensureAuth();
+
 async function refreshStats() {
   try { const s = await (await fetch(API + "/stats")).json();
-    $("stats").textContent = `${s.docs} docs · ${s.chunks} chunks`; } catch {}
+    $("stats").textContent = `${s.docs} docs · ${s.chunks} chunks · ${s.backend}`; } catch {}
 }
 refreshStats();
 

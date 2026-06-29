@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Your second brain — keyless personal knowledge layer (Jina + local embeddings + Puter LLM)",
   "scripts": {
+    "setup": "npm install --ignore-scripts && node scripts/patch-sharp.mjs",
     "start": "node server.mjs",
     "collect": "node scripts/collect.mjs",
     "digest": "node scripts/digest.mjs",

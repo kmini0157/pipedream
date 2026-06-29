@@ -1,0 +1,29 @@
+# Render.com blueprint. New > Blueprint > point at this repo (root: second-brain).
+# Set AUTH_TOKEN / LIBSQL_* as secret env vars in the dashboard.
+services:
+  - type: web
+    name: second-brain
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    plan: starter            # the local model needs >512MB; starter is safer than free
+    envVars:
+      - key: PORT
+        value: "8787"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: EMBED_PROVIDER
+        value: local
+      - key: STORE
+        value: libsql        # Turso for persistence (Render disks are per-instance)
+      - key: NOTIFY
+        value: ntfy
+      - key: AUTH_TOKEN
+        sync: false          # set in dashboard
+      - key: LIBSQL_URL
+        sync: false
+      - key: LIBSQL_AUTH_TOKEN
+        sync: false
+      - key: NTFY_TOPIC
+        sync: false

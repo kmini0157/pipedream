@@ -1,0 +1,39 @@
+# Fly.io deploy config. `fly launch --no-deploy` then `fly deploy`.
+# Set secrets first:  fly secrets set AUTH_TOKEN=... LIBSQL_URL=... LIBSQL_AUTH_TOKEN=...
+app = "second-brain"
+primary_region = "nrt"  # Tokyo; change as needed
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8787"
+  HOST = "0.0.0.0"
+  EMBED_PROVIDER = "local"
+  STORE = "libsql"          # use Turso for multi-instance persistence
+  NOTIFY = "ntfy"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.checks]
+    [http_service.checks.health]
+      method = "get"
+      path = "/health"
+      interval = "30s"
+      timeout = "5s"
+
+# Optional: a volume for the local model cache + ndjson store (single machine).
+# Only needed if STORE=ndjson or to avoid re-downloading the model per boot.
+# [mounts]
+#   source = "sb_data"
+#   destination = "/app/data"
+
+[[vm]]
+  memory = "1gb"   # the local MiniLM model needs headroom; 512mb is tight
+  cpu_kind = "shared"
+  cpus = 1
