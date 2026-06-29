@@ -52,4 +52,8 @@ export async function listDocs(filters = {}) {
 export async function docCentroids() {
   return (await adapter()).docCentroids();
 }
+export async function telemetry() {
+  const a = await adapter();
+  return a.telemetry ? a.telemetry() : { backend: STORE };
+}
 export const backend = STORE;

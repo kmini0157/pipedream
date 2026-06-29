@@ -43,6 +43,11 @@ JS에서 코사인을 도는 대신 인덱스로 상위 후보만 가져옵니�
 `vector_top_k` 결과에 SQL `WHERE`로 결합됩니다. 네이티브 함수가 없는 빌드에서는
 자동으로 JS 코사인 폴백으로 내려갑니다(ndjson은 항상 JS 코사인).
 
+**관측(telemetry)**: 필터가 ANN 후보를 k 미만으로 깎으면 전수검색으로 백필하는데,
+이게 조용히 일어나지 않도록 카운터로 추적합니다(`native`/`backfill`/`jsFallback`/
+`nativeErrors`). `GET /telemetry`로 조회하고, 백필·네이티브 오류 시 서버 로그에도
+경고를 남깁니다. 백필이 잦으면 over-fetch 배수를 올릴 신호입니다.
+
 ```bash
 # 로컬 SQLite 로 전환
 STORE=libsql LIBSQL_URL=file:data/store.db npm start
@@ -132,7 +137,8 @@ SUMMARY=llm LLM_BASE_URL=https://api.groq.com/openai/v1 \
 ## 정리 & 조직
 
 - **자유 태그**: 주제(단일)와 별개로 문서마다 여러 태그를 달 수 있습니다. 추가
-  화면의 태그 입력란(쉼표 구분) 또는 `POST /tag`. 검색에서 `#태그` 칩으로 필터링.
+  화면의 태그 입력란(쉼표 구분, **기존 태그 자동완성** — 입력 중 현재 토큰으로 제안,
+  ↑↓·Enter·클릭으로 선택) 또는 `POST /tag`. 검색에서 `#태그` 칩으로 필터링.
 - **즐겨찾기**: 라이브러리(📚)에서 ☆/⭐ 토글, 또는 `POST /fav`. 검색에서 "⭐
   즐겨찾기만" 체크.
 - **중복 정리**(🧹): `완전 동일`(contentHash)과 `유사`(센트로이드 코사인 ≥ 임계값)
@@ -161,6 +167,7 @@ SQL `WHERE`로 내려갑니다.
 | POST | `/fav` | `{docId, fav}` | 즐겨찾기 토글 |
 | GET | `/duplicates` | `?threshold=0.92` | 중복/유사 문서 클러스터 탐지 |
 | POST | `/merge` | `{keepDocId, dropDocIds[]}` | 클러스터 병합 (태그 합집합) |
+| GET | `/telemetry` | — | 검색 경로 카운터 (native/backfill/jsFallback) |
 | GET | `/stats` | — | 저장된 docs/chunks 수 |
 | GET/POST/DELETE | `/watches` | `{topic,url}` / `?id=` | 관심 주제 관리 |
 | POST | `/collect` | — | 모든 주제 폴링 후 새 글 ingest |
@@ -192,6 +199,7 @@ second-brain/
   scripts/smoke-tags.mjs   # 오프라인 E2E (태그·즐겨찾기)
   scripts/smoke-dedup.mjs  # 오프라인 E2E (중복 탐지·병합)
   scripts/smoke-vector.mjs # libSQL 네이티브 벡터 패리티 (STORE=libsql)
+  scripts/smoke-telemetry.mjs # libSQL 백필 telemetry (STORE=libsql)
   scripts/collect.mjs      # cron: 수집
   scripts/digest.mjs       # cron: 다이제스트 + 전송
   examples/github-actions-daily.yml

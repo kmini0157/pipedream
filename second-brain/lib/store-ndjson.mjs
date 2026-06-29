@@ -49,7 +49,13 @@ function matches(r, f) {
   return true;
 }
 
+const _tel = { searches: 0 };
+export function telemetry() {
+  return { backend: "ndjson", mode: "js-cosine", searches: _tel.searches };
+}
+
 export function search(queryVec, k = 5, filters = {}) {
+  _tel.searches++;
   return load()
     .filter((r) => matches(r, filters))
     .map((r) => ({ ...r, score: cosine(queryVec, r.vec) }))

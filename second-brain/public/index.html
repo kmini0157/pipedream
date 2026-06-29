@@ -21,6 +21,8 @@
   .src { font-size: 12px; opacity: .7; margin-top: 6px; }
   .answer { white-space: pre-wrap; }
   .pill { display: inline-block; background: #4f46e522; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+  .tagopt { padding: 6px 10px; cursor: pointer; font-size: 14px; }
+  .tagopt:hover, .tagopt.active { background: #4f46e533; }
 </style>
 </head>
 <body>
@@ -31,7 +33,10 @@
   <strong>＋ 추가하기</strong>
   <div class="row"><input id="url" placeholder="https://… (웹페이지 URL — Jina로 추출)" /></div>
   <div class="row"><textarea id="text" placeholder="또는 직접 메모/텍스트 붙여넣기"></textarea></div>
-  <div class="row"><input id="tags" placeholder="태그 (쉼표로 구분, 예: gpu, 무료, 리서치)" /></div>
+  <div class="row" style="position:relative">
+    <input id="tags" placeholder="태그 (쉼표로 구분, 예: gpu, 무료, 리서치)" autocomplete="off" />
+    <div id="tagSuggest" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:20;background:Canvas;color:CanvasText;border:1px solid #8886;border-radius:8px;margin-top:2px;max-height:180px;overflow:auto"></div>
+  </div>
   <div class="row">
     <button id="addBtn">저장</button>
     <button id="micBtn" style="background:#7c3aed" title="브라우저 음성 인식">🎙️ 음성</button>
@@ -262,8 +267,10 @@ async function loadTopics() {
 loadTopics();
 
 let selectedTag = null;
+let allTags = [];
 async function loadTags() {
   const { tags } = await (await fetch(API + "/tags")).json();
+  allTags = tags.map((t) => t.tag); // feed the tag-input autocomplete
   if (!tags.length) { $("tagChips").innerHTML = ""; return; }
   const chip = (label, key, count) =>
     `<a href="#" data-tag="${esc(key ?? "")}" class="tchip" style="text-decoration:none;border:1px solid #8886;border-radius:999px;padding:3px 10px;font-size:13px;${selectedTag === key ? "background:#0891b2;color:#fff" : ""}">#${esc(label)}${count != null ? ` <span class="muted">${esc(count)}</span>` : ""}</a>`;
@@ -277,6 +284,48 @@ async function loadTags() {
   });
 }
 loadTags();
+
+// ---- tag autocomplete on the capture input (suggests existing tags) ----
+let tagSuggestIdx = -1;
+function lastToken(val) { return val.split(",").pop().trim(); }
+function applyTag(tag) {
+  const parts = $("tags").value.split(",");
+  parts[parts.length - 1] = " " + tag;
+  $("tags").value = parts.join(",").replace(/^\s+/, "") + ", ";
+  $("tagSuggest").style.display = "none";
+  tagSuggestIdx = -1;
+  $("tags").focus();
+}
+function renderTagSuggest() {
+  const tok = lastToken($("tags").value).toLowerCase();
+  const chosen = new Set($("tags").value.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
+  const matches = !tok ? [] : allTags
+    .filter((t) => t.toLowerCase().includes(tok) && !chosen.has(t.toLowerCase()))
+    .slice(0, 8);
+  tagSuggestIdx = -1;
+  if (!matches.length) { $("tagSuggest").style.display = "none"; return; }
+  $("tagSuggest").innerHTML = matches
+    .map((t) => `<div class="tagopt" data-tag="${esc(t)}">#${esc(t)}</div>`).join("");
+  $("tagSuggest").style.display = "block";
+  document.querySelectorAll("#tagSuggest .tagopt").forEach((el) =>
+    el.addEventListener("mousedown", (e) => { e.preventDefault(); applyTag(el.dataset.tag); }));
+}
+$("tags").addEventListener("input", renderTagSuggest);
+$("tags").addEventListener("keydown", (e) => {
+  const opts = [...document.querySelectorAll("#tagSuggest .tagopt")];
+  if (!opts.length || $("tagSuggest").style.display === "none") return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    tagSuggestIdx = (tagSuggestIdx + (e.key === "ArrowDown" ? 1 : -1) + opts.length) % opts.length;
+    opts.forEach((o, i) => o.classList.toggle("active", i === tagSuggestIdx));
+  } else if (e.key === "Enter" && tagSuggestIdx >= 0) {
+    e.preventDefault();
+    applyTag(opts[tagSuggestIdx].dataset.tag);
+  } else if (e.key === "Escape") {
+    $("tagSuggest").style.display = "none";
+  }
+});
+$("tags").addEventListener("blur", () => setTimeout(() => { $("tagSuggest").style.display = "none"; }, 150));
 
 function highlight(text, query) {
   const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])].filter((t) => t.length > 1);

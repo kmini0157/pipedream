@@ -2,7 +2,7 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { embed, embedOne } from "./lib/embed.mjs";
-import { search, stats, topics, tagFacet, setTags, setFav, listDocs } from "./lib/store.mjs";
+import { search, stats, topics, tagFacet, setTags, setFav, listDocs, telemetry, backend } from "./lib/store.mjs";
 import * as feeds from "./lib/feeds.mjs";
 import { collectAll } from "./lib/collect.mjs";
 import { buildDigest } from "./lib/digest.mjs";
@@ -181,7 +181,8 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && req.url.startsWith("/ingest-file")) return handleIngestFile(req, res);
     if (req.method === "GET" && req.url.startsWith("/clip")) return handleClip(req, res);
     if (req.method === "POST" && req.url === "/search") return handleSearch(req, res);
-    if (req.method === "GET" && req.url === "/stats") return json(res, 200, await stats());
+    if (req.method === "GET" && req.url === "/stats") return json(res, 200, { ...(await stats()), backend });
+    if (req.method === "GET" && req.url === "/telemetry") return json(res, 200, await telemetry());
     if (req.method === "GET" && req.url === "/topics") return json(res, 200, { topics: await topics() });
     if (req.method === "GET" && req.url === "/tags") return json(res, 200, { tags: await tagFacet() });
     if (req.method === "POST" && req.url === "/tag") return handleTag(req, res);

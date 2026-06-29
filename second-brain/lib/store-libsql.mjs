@@ -109,12 +109,19 @@ async function jsSearch(queryVec, k, filters) {
     .map(strip);
 }
 
+// Observability for the ANN vs JS-cosine paths (see telemetry()).
+const _tel = { searches: 0, native: 0, backfill: 0, jsFallback: 0, nativeErrors: 0 };
+export function telemetry() {
+  return { backend: "libsql", nativeEnabled: _native, ..._tel };
+}
+
 export async function search(queryVec, k = 5, filters = {}) {
   await ready();
   if (!Array.isArray(queryVec) || queryVec.length !== DIM) {
     throw new Error(`query vector must be a ${DIM}-dim array (got ${Array.isArray(queryVec) ? queryVec.length : typeof queryVec})`);
   }
   k = Math.max(1, Math.min(1000, Math.floor(k) || 5));
+  _tel.searches++;
   const c = client();
   const hasFilters = Object.keys(filters).length > 0;
 
@@ -134,13 +141,20 @@ export async function search(queryVec, k = 5, filters = {}) {
       });
       // If filters pruned the ANN candidates below k, backfill with an
       // exhaustive scan so we still return up to k results (parity w/ ndjson).
-      if (!(hasFilters && rows.length < k)) {
+      if (hasFilters && rows.length < k) {
+        _tel.backfill++;
+        console.warn(`[second-brain] filtered ANN returned ${rows.length} < k=${k}; backfilling with exhaustive scan`, filters);
+      } else {
+        _tel.native++;
         return rows.map((r) => ({ ...strip(r), score: 1 - Number(r.dist) }));
       }
     } catch (e) {
+      _tel.nativeErrors++;
       console.warn("[second-brain] native vector path failed, using JS cosine:", e.message);
       _native = false; // degrade for subsequent calls too
     }
+  } else {
+    _tel.jsFallback++;
   }
 
   return jsSearch(queryVec, k, filters);

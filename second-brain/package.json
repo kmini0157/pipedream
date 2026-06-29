@@ -14,7 +14,8 @@
     "smoke:search": "node scripts/smoke-search.mjs",
     "smoke:tags": "node scripts/smoke-tags.mjs",
     "smoke:dedup": "node scripts/smoke-dedup.mjs",
-    "smoke:vector": "node scripts/smoke-vector.mjs"
+    "smoke:vector": "node scripts/smoke-vector.mjs",
+    "smoke:telemetry": "node scripts/smoke-telemetry.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
