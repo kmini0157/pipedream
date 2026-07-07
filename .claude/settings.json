@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm install)",
+      "Bash(pnpm install:*)",
+      "Bash(pnpm test)",
+      "Bash(pnpm test:*)",
+      "Bash(pnpm run build)",
+      "Bash(pnpm run test:*)",
+      "Bash(pnpm run platform-test)",
+      "Bash(pnpm run types-test)",
+      "Bash(pnpm run helpers-test)",
+      "Bash(pnpm exec eslint:*)",
+      "Bash(pnpm exec jest:*)",
+      "Bash(node scripts/findBadKeys.js:*)",
+      "Bash(node scripts/findDuplicateKeys.js)",
+      "Bash(node scripts/generate-package-report.js:*)"
+    ]
+  }
+}

@@ -100,6 +100,7 @@ bzIwsJqzXfINt
 Calendly
 Calendly
 Calendly
+camelCase
 CAsCBBYCAwECHgECF
 cellId
 Chargebee
@@ -206,6 +207,7 @@ Draftable
 Dribbble
 DropBox
 dropdown
+dropdowns
 DSgDCDZzbZOcYZ
 duJoEM
 dylburger
@@ -517,6 +519,7 @@ Marketplacer
 Mautic
 mawVvVeVrM
 mBWf
+MCP
 md
 MDN
 mediaType
@@ -534,6 +537,7 @@ mjs
 mmac
 Moneybird
 MonkeyLearn
+monorepo
 Moosend
 MPIW
 mQINBF
@@ -658,6 +662,7 @@ pn
 pN
 png
 png
+pnpm
 Poco
 Podio
 Podio
@@ -970,6 +975,7 @@ WooCommerce
 wordlist
 Workboard
 WorkDrive
+workspaces
 Wrike
 writeFileSync
 WSL
