@@ -1,0 +1,6 @@
+# Windows batch files must be CRLF for cmd.exe (LF breaks multi-line blocks);
+# everything else stays LF regardless of contributor autocrlf settings.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sh  text eol=lf
+*.mjs text eol=lf

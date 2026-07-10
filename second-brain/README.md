@@ -23,6 +23,22 @@ npm run setup          # install + sharp 스텁 패치 (로컬 임베딩용)
 npm start              # http://localhost:8787 접속
 ```
 
+### 🖥️ 바탕화면에서 더블클릭으로 실행
+
+한 번만 설치 스크립트를 돌리면 바탕화면 아이콘이 생깁니다. 이후 더블클릭
+한 번으로 서버가 켜지고 브라우저가 자동으로 열립니다(이미 켜져 있으면
+브라우저만 엽니다). 첫 실행 시 의존성도 자동 설치됩니다.
+
+| OS | 설치 (한 번) | 만들어지는 것 |
+|----|-------------|---------------|
+| Windows | `launchers\install-desktop.bat` 더블클릭 | 바탕화면 "Second Brain" 바로가기 |
+| macOS | `sh launchers/install-desktop.sh` | `~/Desktop/Second Brain.command` |
+| Linux | `sh launchers/install-desktop.sh` | `~/Desktop/second-brain.desktop` |
+
+바로가기 없이 바로 실행하려면 `launchers/start.sh`(macOS/Linux) 또는
+`launchers\start.bat`(Windows)을 더블클릭해도 됩니다. `.env`가 있으면
+자동으로 읽습니다.
+
 > `npm run setup`은 네이티브 빌드 없이 설치하고 transformers.js가 쓰지 않는
 > `sharp`를 무해한 스텁으로 패치합니다. `EMBED_PROVIDER=hashing`만 쓸 거면
 > 일반 `npm install`로도 충분합니다.
@@ -251,6 +267,7 @@ second-brain/
   scripts/collect.mjs      # cron: 수집
   scripts/digest.mjs       # cron: 다이제스트 + 전송
   examples/github-actions-daily.yml
+  launchers/                        # 데스크탑 런처 (start.sh/.bat, install-desktop.*)
   Dockerfile / .dockerignore        # 컨테이너 이미지
   fly.toml / render.yaml            # 배포 타깃
   scripts/patch-sharp.mjs           # transformers.js용 sharp 스텁 패치
