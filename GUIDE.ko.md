@@ -2,11 +2,21 @@
 
 이 저장소는 [PipedreamHQ/pipedream](https://github.com/PipedreamHQ/pipedream) 공식 모노레포의 포크입니다. Pipedream은 앱과 앱을 연결해 자동화 워크플로우를 만드는 통합 플랫폼이고, 이 저장소에는 약 3,400개 앱 통합(컴포넌트)의 소스 코드가 들어 있습니다.
 
+## 나에게 맞는 사용법 찾기 (결정 가이드)
+
+| 하고 싶은 것 | 정답 | 참고 |
+|---|---|---|
+| **A. 앱 자동화를 그냥 쓰고 싶다** (Slack 알림, 시트 자동 기록 등) | [pipedream.com](https://pipedream.com) 가입 후 웹 UI에서 워크플로우 생성. **이 저장소는 필요 없음** | — |
+| **B. Claude 같은 AI에서 2,800+ 앱을 도구로 쓰고 싶다** | Pipedream **원격 MCP 서버** 사용 ([안내](https://pipedream.com/docs/connect/mcp/developers), [mcp.pipedream.com](https://mcp.pipedream.com)) | `COOKBOOK.ko.md` 레시피 4 |
+| **C. 통합(컴포넌트)을 만들거나 고쳐서 기여하고 싶다** | **이 저장소의 핵심 용도.** `components/`에서 개발 → 공식 저장소로 PR | `COOKBOOK.ko.md` 레시피 1–3 |
+| **D. 내 서비스에 통합 기능을 임베드하고 싶다** | Pipedream Connect + SDK v2 ([별도 저장소](https://github.com/PipedreamHQ/pipedream-sdk-typescript)) — 이 저장소의 `packages/`는 개념 학습용 | `COOKBOOK.ko.md` 레시피 5 |
+| **E. 실전 API 연동 코드를 레퍼런스로 학습하고 싶다** | `components/` 훑어보기 — 3,400개 실제 서비스의 API 클라이언트 패턴 모음 | 아래 구조 표 |
+
 ## 이 저장소로 할 수 있는 것
 
 - **기존 컴포넌트 수정** — 버그 수정, 기능 개선 후 공식 저장소에 PR 제출
 - **새 컴포넌트 개발** — 원하는 앱의 액션(Action)·소스(Source)를 직접 만들기
-- **코드 참고** — 1,000개 이상 API 연동 방식의 실제 구현 예시 열람
+- **코드 참고** — 3,400개 앱의 API 연동 방식 실제 구현 예시 열람
 
 > 참고: 워크플로우를 그냥 *사용*만 하려면 이 저장소가 필요 없습니다. [pipedream.com](https://pipedream.com)에서 바로 사용하면 됩니다. 이 저장소는 컴포넌트 코드를 직접 수정·개발할 때 필요합니다.
 
@@ -18,9 +28,11 @@
 | `components/{앱이름}/{앱이름}.app.mjs` | 앱 연결 정의, 공용 API 메서드 |
 | `components/{앱이름}/actions/` | 액션 — 작업을 수행하는 컴포넌트 (레코드 생성, 메시지 전송 등) |
 | `components/{앱이름}/sources/` | 소스 — 이벤트를 감지해 워크플로우를 트리거하는 컴포넌트 |
-| `platform/` | 컴포넌트가 사용하는 런타임 라이브러리 (`@pipedream/platform`) |
-| `packages/sdk/` | Pipedream SDK |
-| `docs-v2/` | 공식 문서 (https://pipedream.com/docs) |
+| `platform/` | 컴포넌트가 사용하는 런타임 라이브러리 (`@pipedream/platform`) — 컴포넌트용 `axios`, `ConfigurationError`, 파일 스트림 헬퍼 |
+| `packages/sdk/` | Pipedream SDK v1 (**deprecated** — v2는 [별도 저장소](https://github.com/PipedreamHQ/pipedream-sdk-typescript)) |
+| `packages/connect-react/` | Connect 설정 폼을 렌더링하는 React 라이브러리 |
+| `modelcontextprotocol/` | MCP 서버 참고 구현 (유지보수 중단 — 실사용은 원격 MCP 서버) |
+| `docs-v2/` | deprecated — 공식 문서는 https://pipedream.com/docs |
 
 ## 개발 환경 준비
 
@@ -47,8 +59,10 @@ pnpm exec eslint components/slack/
    - `.github/pipedream-component-guidelines.md` (공통 규칙)
    - `.github/pipedream-action-guidelines.md` (액션 규칙)
    - `.github/pipedream-source-guidelines.md` (소스 규칙)
-3. **버전을 반드시 올립니다** — 컴포넌트의 `version`과 해당 앱의 `package.json` 버전 모두. 올리지 않으면 CI가 실패합니다.
-4. 커밋 후 공식 저장소(`PipedreamHQ/pipedream`)의 `master` 브랜치로 PR을 보냅니다.
+3. **버전을 반드시 올립니다** — 컴포넌트의 `version`과 해당 앱의 `package.json` 버전 모두. 앱 파일이나 `common/`을 수정하면 그것을 import하는 모든 컴포넌트도 함께 올려야 합니다. 올리지 않으면 CI가 실패합니다.
+4. 커밋 후 공식 저장소(`PipedreamHQ/pipedream`)의 `master` 브랜치로 PR을 보냅니다. 머지되면 자동으로 레지스트리에 배포됩니다.
+
+> 실제 코드 예시와 단계별 절차는 **`COOKBOOK.ko.md`** 를 보세요 — 새 앱 만들기 A–Z, 버전 규칙, CI 체크리스트, MCP 연동, Connect 임베드까지 레시피로 정리되어 있습니다.
 
 ### 꼭 지켜야 할 핵심 규칙 요약
 
